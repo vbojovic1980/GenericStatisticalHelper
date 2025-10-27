@@ -1,15 +1,5 @@
 library(R6)
 
-'
-  create method in R for generating groupped box plots in png format should contain parameters:
-  data frame
-  grouping column names
-  column names
-  output path
-  dpi=600
-
-  boxplot should be able to output single image per each grouping variable. image should be named using grouping column name
-'
 GenericHelper <- R6Class(
   "GenericHelper",
   public = list(
@@ -388,15 +378,7 @@ GenericHelper <- R6Class(
       var(normalized, na.rm = TRUE)
     }
     ,
-    
-    
-    #   '
-    #   give me R method which for given data frame does pearson correlation between all given variables as argument.
-    #   when absolute value of correlation is greater or equal than given threshold
-    #   then check if pearson correlation is significant
-    #   if it is significant compare variances of minmax normalized both pairs of variables and remove one variable which has smaller or equal variance.
-    #   return list of removed variables
-    # '
+ 
     correlation_variable_selection = function(df,
                                               variables,
                                               threshold = 0.8,
