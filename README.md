@@ -5,7 +5,12 @@ Just automatizing some statistical methods
 
 ## Overview
 The `GenericHelper` class provides comprehensive statistical analysis and visualization methods for data science workflows in R.
-
+## Example usage
+```R
+source("https://raw.githubusercontent.com/vbojovic1980/GenericStatisticalHelper/main/GenericHelper.R")
+gh=GenericHelper$new()
+gh$someMethod(someParams)
+```
 ## Methods
 
 ### `correlations_and_regressions()`
