@@ -11,6 +11,7 @@ if (!require("devtools")) install.packages("devtools")
 library(dplyr) 
 library(FactoMineR)
 library(factoextra)
+library(FNN)
 if (!require("GGally")) install.packages("GGally")
 library(GGally)
 library(ggpubr)
@@ -3138,7 +3139,182 @@ filter_variables_usingXY = function(data, y_vars, x_vars, cor_threshold, pvalue_
     )
   )
 }
-
-
+,
+KNN_label=function(train_data, test_data, target_var, predictor_vars, k = 1, l = 0) {
+  # Convert to data frames if they are data tables
+  if (is.data.table(train_data)) {
+    train_data <- as.data.frame(train_data)
+  }
+  if (is.data.table(test_data)) {
+    test_data <- as.data.frame(test_data)
+  }
+  
+  # Validate inputs
+  if (!target_var %in% names(train_data)) {
+    stop("Target variable '", target_var, "' not found in training data")
+  }
+  
+  if (!target_var %in% names(test_data)) {
+    stop("Target variable '", target_var, "' not found in test data")
+  }
+  
+  if (!all(predictor_vars %in% names(train_data))) {
+    missing_vars <- setdiff(predictor_vars, names(train_data))
+    stop("Predictor variable(s) not found in training data: ", paste(missing_vars, collapse = ", "))
+  }
+  
+  if (!all(predictor_vars %in% names(test_data))) {
+    missing_vars <- setdiff(predictor_vars, names(test_data))
+    stop("Predictor variable(s) not found in test data: ", paste(missing_vars, collapse = ", "))
+  }
+  
+  if (k <= 0 || k > nrow(train_data)) {
+    stop("k must be a positive integer less than or equal to the number of training observations")
+  }
+  
+  # Extract features and target from training data
+  train_features <- train_data[, predictor_vars, drop = FALSE]
+  train_labels <- train_data[[target_var]]
+  
+  # Extract features from test data (target is only for evaluation)
+  test_features <- test_data[, predictor_vars, drop = FALSE]
+  test_actual <- test_data[[target_var]]
+  
+  # Ensure target is a factor for classification
+  if (!is.factor(train_labels)) {
+    warning("Converting training target variable to factor")
+    train_labels <- as.factor(train_labels)
+  }
+  
+  if (!is.factor(test_actual)) {
+    test_actual <- as.factor(test_actual)
+  }
+  
+  # Apply KNN with fixed prob = TRUE and use.all = TRUE
+  predictions <- knn(
+    train = train_features,
+    test = test_features,
+    cl = train_labels,
+    k = k,
+    l = l,
+    prob = TRUE,      # Fixed to TRUE
+    use.all = TRUE    # Fixed to TRUE
+  )
+  
+  # Extract probabilities
+  probabilities <- attr(predictions, "prob")
+  
+  # Calculate accuracy
+  accuracy <- mean(predictions == test_actual)
+  
+  # Create confusion matrix
+  conf_matrix <- table(Predicted = predictions, Actual = test_actual)
+  
+  # Return comprehensive results
+  result <- list(
+    predictions = predictions,
+    probabilities = probabilities,
+    test_actual = test_actual,
+    accuracy = accuracy,
+    confusion_matrix = conf_matrix,
+    target_variable = target_var,
+    predictor_variables = predictor_vars,
+    k = k,
+    l = l,
+    classes = levels(train_labels),
+    n_train = nrow(train_data),
+    n_test = nrow(test_data)
+  )
+  
+  class(result) <- "knn_result"
+  return(result)
+}
+,
+KNN_reg = function(train_data, test_data, target_var, predictor_vars, k = 5) {
+  # Convert to data frames if they are data tables
+  if (is.data.table(train_data)) {
+    train_data <- as.data.frame(train_data)
+  }
+  if (is.data.table(test_data)) {
+    test_data <- as.data.frame(test_data)
+  }
+  
+  # Validate inputs
+  if (!target_var %in% names(train_data)) {
+    stop("Target variable '", target_var, "' not found in training data")
+  }
+  
+  if (!target_var %in% names(test_data)) {
+    stop("Target variable '", target_var, "' not found in test data")
+  }
+  
+  if (!all(predictor_vars %in% names(train_data))) {
+    missing_vars <- setdiff(predictor_vars, names(train_data))
+    stop("Predictor variable(s) not found in training data: ", paste(missing_vars, collapse = ", "))
+  }
+  
+  if (!all(predictor_vars %in% names(test_data))) {
+    missing_vars <- setdiff(predictor_vars, names(test_data))
+    stop("Predictor variable(s) not found in test data: ", paste(missing_vars, collapse = ", "))
+  }
+  
+  if (k <= 0 || k > nrow(train_data)) {
+    stop("k must be a positive integer less than or equal to the number of training observations")
+  }
+  
+  # Extract features and target from training data
+  train_features <- train_data[, predictor_vars, drop = FALSE]
+  train_target <- train_data[[target_var]]
+  
+  # Extract features from test data (target is only for evaluation)
+  test_features <- test_data[, predictor_vars, drop = FALSE]
+  test_actual <- test_data[[target_var]]
+  
+  # Ensure target is numeric for regression
+  if (!is.numeric(train_target)) {
+    warning("Converting training target variable to numeric")
+    train_target <- as.numeric(train_target)
+  }
+  
+  if (!is.numeric(test_actual)) {
+    test_actual <- as.numeric(test_actual)
+  }
+  
+  # Apply KNN Regression
+  knn_result <- knn.reg(
+    train = train_features,
+    test = test_features,
+    y = train_target,
+    k = k
+  )
+  
+  predictions <- knn_result$pred
+  
+  # Calculate regression metrics
+  residuals <- test_actual - predictions
+  mse <- mean(residuals^2)
+  rmse <- sqrt(mse)
+  mae <- mean(abs(residuals))
+  r_squared <- 1 - (sum(residuals^2) / sum((test_actual - mean(test_actual))^2))
+  
+  # Return comprehensive results
+  result <- list(
+    predictions = predictions,
+    test_actual = test_actual,
+    residuals = residuals,
+    mse = mse,
+    rmse = rmse,
+    mae = mae,
+    r_squared = r_squared,
+    target_variable = target_var,
+    predictor_variables = predictor_vars,
+    k = k,
+    n_train = nrow(train_data),
+    n_test = nrow(test_data)
+  )
+  
+  class(result) <- "knn_regression_result"
+  return(result)
+}
   )
 )
