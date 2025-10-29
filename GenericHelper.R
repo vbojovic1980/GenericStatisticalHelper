@@ -3316,5 +3316,139 @@ KNN_reg = function(train_data, test_data, target_var, predictor_vars, k = 5) {
   class(result) <- "knn_regression_result"
   return(result)
 }
+,
+generate_correlation_plots_scatter = function(data, variables, pvalue = 0.05, 
+                                              threshold = 0.5, output_folder = "./correlation_plots",
+                                              width = 8, height = 6, dpi = 300) {
+  
+  # Input validation
+  if (!is.data.frame(data)) {
+    stop("The 'data' argument must be a data frame")
+  }
+  
+  if (!all(variables %in% names(data))) {
+    missing_vars <- variables[!variables %in% names(data)]
+    stop("The following variables are not in the data frame: ", 
+         paste(missing_vars, collapse = ", "))
+  }
+  
+  if (!dir.exists(output_folder)) {
+    dir.create(output_folder, recursive = TRUE)
+    message("Created output folder: ", output_folder)
+  }
+  
+  # Subset data to selected variables
+  data_subset <- data[, variables, drop = FALSE]
+  
+  # Remove non-numeric variables with warning
+  numeric_vars <- sapply(data_subset, is.numeric)
+  if (!all(numeric_vars)) {
+    non_numeric <- variables[!numeric_vars]
+    warning("The following variables are not numeric and will be excluded: ",
+            paste(non_numeric, collapse = ", "))
+    variables <- variables[numeric_vars]
+    data_subset <- data_subset[, numeric_vars, drop = FALSE]
+  }
+  
+  if (length(variables) < 2) {
+    stop("At least 2 numeric variables are required for correlation analysis")
+  }
+  
+  # Calculate correlation matrix and p-values
+  cor_matrix <- cor(data_subset, use = "pairwise.complete.obs")
+  
+  # Function to calculate correlation p-values
+  cor_pvalue <- function(x, y) {
+    cor_test <- cor.test(x, y, use = "pairwise.complete.obs")
+    return(cor_test$p.value)
+  }
+  
+  # Create p-value matrix
+  pvalue_matrix <- matrix(NA, nrow = length(variables), ncol = length(variables))
+  rownames(pvalue_matrix) <- colnames(pvalue_matrix) <- variables
+  
+  for (i in 1:length(variables)) {
+    for (j in 1:length(variables)) {
+      if (i != j) {
+        pvalue_matrix[i, j] <- cor_pvalue(data_subset[[variables[i]]], 
+                                          data_subset[[variables[j]]])
+      }
+    }
+  }
+  
+  # Create results data frame
+  results <- data.frame()
+  
+  # Generate plots for significant correlations
+  plot_count <- 0
+  
+  for (i in 1:(length(variables)-1)) {
+    for (j in (i+1):length(variables)) {
+      var1 <- variables[i]
+      var2 <- variables[j]
+      cor_value <- cor_matrix[i, j]
+      p_val <- pvalue_matrix[i, j]
+      
+      # Check if correlation meets criteria
+      if (!is.na(p_val) && p_val < pvalue && abs(cor_value) >= threshold) {
+        
+        # Create plot
+        p <- ggplot2::ggplot(data_subset, ggplot2::aes(x = .data[[var1]], y = .data[[var2]])) +
+          ggplot2::geom_point(alpha = 0.6, size = 2) +
+          ggplot2::geom_smooth(method = "lm", se = TRUE, color = "red", linetype = "solid") +
+          ggplot2::labs(
+            title = paste("Correlation:", var1, "vs", var2),
+            subtitle = paste0("r = ", round(cor_value, 3), 
+                              ", p = ", format.pval(p_val, digits = 3)),
+            x = var1,
+            y = var2
+          ) +
+          ggplot2::theme_minimal() +
+          ggplot2::theme(
+            plot.title = ggplot2::element_text(face = "bold", size = 14),
+            plot.subtitle = ggplot2::element_text(size = 11, color = "darkred")
+          )
+        
+        # Create filename
+        filename <- file.path(output_folder, 
+                              paste0("correlation_", var1, "_", var2, ".png"))
+        
+        # Save plot
+        ggplot2::ggsave(
+          filename = filename,
+          plot = p,
+          width = width,
+          height = height,
+          dpi = dpi,
+          device = "png"
+        )
+        
+        plot_count <- plot_count + 1
+        
+        # Add to results
+        results <- rbind(results, data.frame(
+          Variable1 = var1,
+          Variable2 = var2,
+          Correlation = cor_value,
+          P_value = p_val,
+          Plot_file = basename(filename),
+          stringsAsFactors = FALSE
+        ))
+      }
+    }
+  }
+  
+  # Print summary
+  if (plot_count == 0) {
+    message("No correlations met the specified criteria (p < ", pvalue, 
+            " and |r| >= ", threshold, ")")
+  } else {
+    message("Generated ", plot_count, " scatter plots in '", output_folder, "'")
+  }
+  
+  # Return results invisibly
+  invisible(results)
+}
+
   )
 )
