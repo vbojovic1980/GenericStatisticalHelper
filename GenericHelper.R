@@ -418,20 +418,26 @@ GenericHelper <- R6Class(
  
     correlation_variable_selection = function(df,
                                               variables,
+                                              correlation_method = "pearson",
                                               threshold = 0.8,
-                                              alpha = 0.05) {
+                                              alpha = 0.05,
+                                              use_method = "pairwise.complete.obs") {
       #' Perform correlation-based variable selection
       #'
       #' @param df Data frame containing the variables
       #' @param variables Character vector of variable names to analyze
+      #' @param correlation_method Correlation method: "pearson", "spearman", or "kendall" (default = "pearson")
       #' @param threshold Correlation threshold (absolute value, default = 0.8)
       #' @param alpha Significance level for correlation test (default = 0.05)
+      #' @param use_method Method for handling missing values (default = "pairwise.complete.obs")
       #'
       #' @return List containing:
       #'   - removed_vars: Character vector of removed variables
       #'   - remaining_vars: Character vector of remaining variables
       #'   - all_vars: Character vector of all input variables
       #'   - similar_vars: List showing which variables were similar to removed ones
+      #'   - correlation_method: Method used for correlation calculation
+      #'   - threshold: Threshold used for variable removal
       
       # Input validation
       if (!all(variables %in% names(df))) {
@@ -440,6 +446,13 @@ GenericHelper <- R6Class(
       
       if (length(variables) < 2) {
         stop("At least 2 variables are required for correlation analysis")
+      }
+      
+      # Validate correlation method
+      valid_methods <- c("pearson", "spearman", "kendall")
+      if (!correlation_method %in% valid_methods) {
+        stop("Invalid correlation_method. Choose from: ", 
+             paste(valid_methods, collapse = ", "))
       }
       
       # Subset the data to only include specified variables
@@ -451,7 +464,14 @@ GenericHelper <- R6Class(
         stop("At least 2 numeric variables are required")
       }
       
-      data_subset <- data_subset[, numeric_vars]
+      # Warn about non-numeric variables
+      if (!all(numeric_vars)) {
+        non_numeric_vars <- variables[!numeric_vars]
+        warning("The following non-numeric variables will be excluded: ",
+                paste(non_numeric_vars, collapse = ", "))
+      }
+      
+      data_subset <- data_subset[, numeric_vars, drop = FALSE]
       all_vars <- names(data_subset)
       remaining_vars <- all_vars
       removed_vars <- character(0)
@@ -459,8 +479,8 @@ GenericHelper <- R6Class(
       
       # Function to min-max normalize a vector
       minmax_normalize <- function(x) {
-        if (length(unique(x)) == 1)
-          return(rep(0, length(x))) # Handle constant variables
+        if (length(unique(x)) == 1 || all(is.na(x)))
+          return(rep(0, length(x))) # Handle constant variables or all NA
         (x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
       }
       
@@ -470,8 +490,20 @@ GenericHelper <- R6Class(
         var(normalized, na.rm = TRUE)
       }
       
-      # Create correlation matrix
-      cor_matrix <- cor(data_subset, use = "pairwise.complete.obs")
+      # Create correlation matrix with specified method
+      cor_matrix <- cor(data_subset, 
+                        method = correlation_method, 
+                        use = use_method)
+      
+      # Get correlation symbol for messages
+      cor_symbol <- switch(correlation_method,
+                           "pearson" = "r",
+                           "spearman" = "ρ", 
+                           "kendall" = "τ")
+      
+      message("Performing variable selection using ", correlation_method, " correlation (", cor_symbol, ")")
+      message("Threshold: |", cor_symbol, "| >= ", threshold)
+      message("Significance level: α = ", alpha)
       
       # Find pairs with high correlation
       high_cor_pairs <- which(abs(cor_matrix) >= threshold &
@@ -485,10 +517,15 @@ GenericHelper <- R6Class(
             removed_vars = removed_vars,
             remaining_vars = remaining_vars,
             all_vars = all_vars,
-            similar_vars = similar_vars
+            similar_vars = similar_vars,
+            correlation_method = correlation_method,
+            threshold = threshold,
+            alpha = alpha
           )
         )
       }
+      
+      message("Found ", nrow(high_cor_pairs), " variable pairs with |", cor_symbol, "| >= ", threshold)
       
       # Process each high correlation pair
       for (i in 1:nrow(high_cor_pairs)) {
@@ -499,47 +536,49 @@ GenericHelper <- R6Class(
         var2 <- all_vars[col_idx]
         
         # Skip if either variable has already been removed
-        if (!var1 %in% remaining_vars ||
-            !var2 %in% remaining_vars)
+        if (!var1 %in% remaining_vars || !var2 %in% remaining_vars) {
           next
+        }
         
         # Get actual correlation value
         cor_value <- cor_matrix[row_idx, col_idx]
         
-        # Test correlation significance
-        cor_test <- cor.test(data_subset[[var1]], data_subset[[var2]], use = "pairwise.complete.obs")
+        # Test correlation significance with specified method
+        cor_test <- tryCatch({
+          cor.test(data_subset[[var1]], data_subset[[var2]], 
+                   method = correlation_method, 
+                   use = use_method)
+        }, error = function(e) {
+          warning("Could not calculate p-value for pair (", var1, ", ", var2, "): ", e$message)
+          return(list(p.value = NA))
+        })
         
-        # Check if correlation is significant
-        if (cor_test$p.value <= alpha) {
+        # Check if correlation is significant (or if p-value is NA, proceed with caution)
+        if (is.na(cor_test$p.value) || cor_test$p.value <= alpha) {
           # Calculate variances of min-max normalized variables
           var1_variance <- normalized_variance(data_subset[[var1]])
           var2_variance <- normalized_variance(data_subset[[var2]])
           
-          # Determine which variable to remove
+          # Determine which variable to remove (remove the one with lower normalized variance)
           if (var1_variance <= var2_variance) {
             variable_to_remove <- var1
             similar_variable <- var2
-            removed_reason <- paste0(
-              "Similar to '",
-              var2,
-              "' (correlation = ",
-              round(cor_value, 3),
-              ", p-value = ",
-              round(cor_test$p.value, 4),
-              ")"
-            )
+            variance_ratio <- ifelse(var2_variance > 0, var1_variance / var2_variance, 0)
           } else {
             variable_to_remove <- var2
             similar_variable <- var1
-            removed_reason <- paste0("Similar to '",
-                                     var1,
-                                     "' (correlation = ",
-                                     round(cor_value, 3),
-                                     ", p-value = ",
-              round(cor_test$p.value, 4),
-              ")"
-            )
+            variance_ratio <- ifelse(var1_variance > 0, var2_variance / var1_variance, 0)
           }
+          
+          # Format p-value for display
+          p_value_display <- ifelse(is.na(cor_test$p.value), "NA", round(cor_test$p.value, 4))
+          
+          removed_reason <- paste0(
+            "Similar to '", similar_variable, 
+            "' (", cor_symbol, " = ", round(cor_value, 3),
+            ", p = ", p_value_display,
+            ", variance ratio = ", round(variance_ratio, 3), ")"
+          )
           
           # Add to results
           removed_vars <- c(removed_vars, variable_to_remove)
@@ -548,9 +587,24 @@ GenericHelper <- R6Class(
             similar_to = similar_variable,
             correlation = cor_value,
             p_value = cor_test$p.value,
-            reason = removed_reason
+            variance_ratio = variance_ratio,
+            reason = removed_reason,
+            correlation_method = correlation_method
           )
+          
+          message("Removed '", variable_to_remove, "' - ", removed_reason)
         }
+      }
+      
+      # Summary message
+      if (length(removed_vars) > 0) {
+        message("\nVariable selection completed:")
+        message("  - Removed ", length(removed_vars), " variables: ", paste(removed_vars, collapse = ", "))
+        message("  - Retained ", length(remaining_vars), " variables: ", paste(remaining_vars, collapse = ", "))
+        message("  - Reduction: ", length(all_vars), " → ", length(remaining_vars), 
+                " (", round((1 - length(remaining_vars)/length(all_vars)) * 100, 1), "% reduction)")
+      } else {
+        message("No variables were removed based on the specified criteria")
       }
       
       # Return comprehensive results
@@ -559,10 +613,22 @@ GenericHelper <- R6Class(
           removed_vars = removed_vars,
           remaining_vars = remaining_vars,
           all_vars = all_vars,
-          similar_vars = similar_vars
+          similar_vars = similar_vars,
+          correlation_method = correlation_method,
+          threshold = threshold,
+          alpha = alpha,
+          summary = list(
+            initial_count = length(all_vars),
+            final_count = length(remaining_vars),
+            reduction_percent = round((1 - length(remaining_vars)/length(all_vars)) * 100, 1),
+            removed_count = length(removed_vars)
+          )
         )
       )
-    },
+    }
+    
+    
+    ,
  
     create_group_boxplots_overview = function(df,
                                               output_folder,
@@ -834,7 +900,7 @@ GenericHelper <- R6Class(
     ,
     
     create_variable_boxplots_overview = function(df,
-                                                 output_folder,
+                                                 output_file,
                                                  target_vars,
                                                  dpi = 600,
                                                  width = NULL,
@@ -853,6 +919,19 @@ GenericHelper <- R6Class(
       if (!is.data.frame(df)) {
         stop("The first argument must be a data frame")
       }
+      
+      # Validate output file
+      if (!is.character(output_file) || length(output_file) != 1) {
+        stop("output_file must be a single character string")
+      }
+      
+      # Ensure output file has .png extension
+      if (!grepl("\\.png$", output_file, ignore.case = TRUE)) {
+        stop("output_file must have a .png extension")
+      }
+      
+      # Extract directory from output file path
+      output_folder <- dirname(output_file)
       
       # Create output folder if it doesn't exist
       if (!dir.exists(output_folder)) {
@@ -963,7 +1042,7 @@ GenericHelper <- R6Class(
               size = 15,
               face = "bold",
               hjust = 0.5,
-              margin = margin(b = 12)
+              margin = ggplot2::margin(b = 12)
             ),
             axis.text.x = element_blank(),
             # Remove x-axis text
@@ -979,7 +1058,7 @@ GenericHelper <- R6Class(
               fill = NA,
               linewidth = 0.5
             ),
-            plot.margin = margin(16, 16, 16, 16, "pt"),
+            plot.margin = ggplot2::margin(16, 16, 16, 16, "pt"),
             panel.background = element_rect(fill = "white", color = NA)
           )
         
@@ -997,11 +1076,8 @@ GenericHelper <- R6Class(
         )
       )
       
-      # Create output filename
-      output_file <- file.path(output_folder, "variables_boxplots_overview.png")
-      
       # Save the plot with limitsize = FALSE to allow large dimensions
-      ggsave(
+      ggplot2::ggsave(
         filename = output_file,
         plot = combined_plot,
         width = width,
@@ -1444,7 +1520,7 @@ GenericHelper <- R6Class(
     
     ,
     create_histograms_overview = function(df,
-                                          output_folder,
+                                          output_file,
                                           target_vars,
                                           dpi = 600,
                                           width = NULL,
@@ -1465,17 +1541,29 @@ GenericHelper <- R6Class(
         stop("The first argument must be a data frame")
       }
       
-      # Create output folder if it doesn't exist
-      if (!dir.exists(output_folder)) {
-        cat("Creating output folder:", output_folder, "\n")
-        dir.create(output_folder,
+      # Validate output file path
+      if (!is.character(output_file) || length(output_file) != 1) {
+        stop("Output file must be a single character string")
+      }
+      
+      # Ensure output file has .png extension
+      if (!grepl("\\.png$", output_file, ignore.case = TRUE)) {
+        output_file <- paste0(tools::file_path_sans_ext(output_file), ".png")
+        cat("Added .png extension to output file:", output_file, "\n")
+      }
+      
+      # Create output directory if it doesn't exist
+      output_dir <- dirname(output_file)
+      if (!dir.exists(output_dir) && output_dir != ".") {
+        cat("Creating output directory:", output_dir, "\n")
+        dir.create(output_dir,
                    recursive = TRUE,
                    showWarnings = FALSE)
       }
       
-      # Check if folder was created successfully
-      if (!dir.exists(output_folder)) {
-        stop("Failed to create output folder: ", output_folder)
+      # Check if directory was created successfully (if needed)
+      if (output_dir != "." && !dir.exists(output_dir)) {
+        stop("Failed to create output directory: ", output_dir)
       }
       
       # Validate target variables
@@ -1548,34 +1636,34 @@ GenericHelper <- R6Class(
         target_var <- target_vars[i]
         
         # Create ungrouped histogram for overview
-        p <- ggplot(df, aes(x = .data[[target_var]])) +
-          geom_histogram(
+        p <- ggplot2::ggplot(df, ggplot2::aes(x = .data[[target_var]])) +
+          ggplot2::geom_histogram(
             fill = "steelblue",
             alpha = 0.8,
             bins = bins,
             color = "white",
             size = 0.2
           ) +
-          labs(title = target_var, x = NULL, y = NULL) +
-          theme_minimal() +
-          theme(
-            plot.title = element_text(
+          ggplot2::labs(title = target_var, x = NULL, y = NULL) +
+          ggplot2::theme_minimal() +
+          ggplot2::theme(
+            plot.title = ggplot2::element_text(
               size = 10,
               face = "bold",
               hjust = 0.5,
-              margin = margin(b = 5)
+              margin = ggplot2::margin(b = 5, unit = "pt")
             ),
-            axis.text = element_text(size = 8),
-            axis.title = element_text(size = 9),
-            panel.grid.major = element_line(color = "grey90", linewidth = 0.2),
-            panel.grid.minor = element_blank(),
-            panel.border = element_rect(
+            axis.text = ggplot2::element_text(size = 8),
+            axis.title = ggplot2::element_text(size = 9),
+            panel.grid.major = ggplot2::element_line(color = "grey90", linewidth = 0.2),
+            panel.grid.minor = ggplot2::element_blank(),
+            panel.border = ggplot2::element_rect(
               color = "grey80",
               fill = NA,
               linewidth = 0.3
             ),
-            plot.margin = margin(5, 5, 5, 5, "pt"),
-            panel.background = element_rect(fill = "white", color = NA)
+            plot.margin = ggplot2::margin(5, 5, 5, 5, unit = "pt"),
+            panel.background = ggplot2::element_rect(fill = "white", color = NA)
           )
         
         plot_list[[i]] <- p
@@ -1589,11 +1677,8 @@ GenericHelper <- R6Class(
         top = paste("Histogram Overview:", n_plots, "Variables")
       )
       
-      # Create output filename
-      output_file <- file.path(output_folder, "histograms_overview.png")
-      
       # Save the overview plot
-      ggsave(
+      ggplot2::ggsave(
         filename = output_file,
         plot = combined_plot,
         width = width,
@@ -1606,30 +1691,42 @@ GenericHelper <- R6Class(
       # Print confirmation message
       cat("\n✅ Histogram overview successfully created!\n")
       cat("📁 Output file:", output_file, "\n")
-  cat("📐 Final resolution:", round(width, 1), "×", round(height, 1), "inches\n")
-  cat("🖼️  DPI:", dpi, "\n")
-  cat("📊 Number of histograms:", n_plots, "\n")
-  cat("🔢 Grid layout:", n_rows, "rows ×", n_cols, "columns\n")
-  cat("📦 Number of bins:", bins, "\n")
-  
-  return(invisible(combined_plot))
-}
+      cat("📐 Final resolution:", round(width, 1), "×", round(height, 1), "inches\n")
+      cat("🖼️  DPI:", dpi, "\n")
+      cat("📊 Number of histograms:", n_plots, "\n")
+      cat("🔢 Grid layout:", n_rows, "rows ×", n_cols, "columns\n")
+      cat("📦 Number of bins:", bins, "\n")
+      
+      return(invisible(combined_plot))
+    }
+    
 ,
 
-create_scatter_matrix = function(data, var_names, output_path, 
+create_scatter_matrix = function(data, var_names, output_path,  
+                                 correlation_method = "pearson",
                                  resolution = 300, width = 8, height = 6,
                                  axis_text_size = 5,        # For ALL axis text
                                  axis_title_size = 9,       # Axis titles
                                  strip_text_size = 5,       # Facet labels
                                  dot_size = 0.5,           # Dot size
-                                 cor_text_size = 2.5) {    # Correlation text
+                                 cor_text_size = 2.5,      # Correlation text
+                                 cor_text_color = "black", # Correlation text color
+                                 cor_digits = 2,           # Decimal places for correlation
+                                 cor_use = "complete.obs") { # Handling of missing data
   
   # Load required libraries
   required_packages <- c("GGally", "ggplot2")
   for (pkg in required_packages) {
-    if (!require(pkg, character.only = TRUE)) {
+    if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
       stop("Package ", pkg, " is required. Please install it.")
     }
+  }
+  
+  # Validate correlation method
+  valid_methods <- c("pearson", "spearman", "kendall")
+  if (!correlation_method %in% valid_methods) {
+    stop("Invalid correlation_method. Choose from: ", 
+         paste(valid_methods, collapse = ", "))
   }
   
   # Validate inputs
@@ -1639,22 +1736,77 @@ create_scatter_matrix = function(data, var_names, output_path,
          paste(missing_vars, collapse = ", "))
   }
   
+  # Custom correlation function with specified method
+  custom_cor <- function(data, mapping, 
+                         method = correlation_method,
+                         use = cor_use,
+                         digits = cor_digits,
+                         color = cor_text_color,
+                         size = cor_text_size,
+                         ...) {
+    
+    # Extract data using GGally's helper function
+    x_data <- GGally::eval_data_col(data, mapping$x)
+    y_data <- GGally::eval_data_col(data, mapping$y)
+    
+    # Calculate correlation
+    cor_result <- cor(x_data, y_data, 
+                      method = method, 
+                      use = use)
+    
+    # Format correlation text
+    cor_text <- format(round(cor_result, digits), nsmall = digits)
+    
+    # Create label with correlation coefficient and method abbreviation
+    method_abbr <- switch(method,
+                          "pearson" = "r",
+                          "spearman" = "ρ",
+                          "kendall" = "τ")
+    
+    label <- paste0(method_abbr, " = ", cor_text)
+    
+    # Create the plot
+    ggplot2::ggplot(data = data, mapping = mapping) +
+      ggplot2::annotate("text", 
+                        x = mean(range(x_data, na.rm = TRUE)), 
+                        y = mean(range(y_data, na.rm = TRUE)), 
+                        label = label,
+                        color = color, 
+                        size = size,
+                        fontface = "bold") +
+      ggplot2::theme_void()
+  }
+  
+  # Customize scatterplot points
+  custom_points <- function(data, mapping, ...) {
+    ggplot2::ggplot(data = data, mapping = mapping) + 
+      ggplot2::geom_point(..., alpha = 0.6) +
+      ggplot2::theme_minimal()
+  }
+  
   # Create the pairs plot with consistent tick sizes
   p <- GGally::ggpairs(
-    data[, var_names, drop = FALSE],
+    data = data[, var_names, drop = FALSE],
     progress = FALSE,
     # Customize the lower triangle (scatterplots)
     lower = list(
-      continuous = wrap("points", size = dot_size, alpha = 0.6)
+      continuous = GGally::wrap(custom_points, size = dot_size)
     ),
     # Customize upper triangle (correlations)
     upper = list(
-      continuous = wrap("cor", size = cor_text_size)
+      continuous = GGally::wrap(custom_cor, 
+                                method = correlation_method,
+                                use = cor_use,
+                                digits = cor_digits,
+                                color = cor_text_color,
+                                size = cor_text_size)
     ),
     # Customize diagonal (density plots)
     diag = list(
-      continuous = wrap("densityDiag", alpha = 0.7)
-    )
+      continuous = GGally::wrap("densityDiag", alpha = 0.7, color = "black", fill = "gray80")
+    ),
+    # Axis labels appearance
+    axisLabels = "show"
   ) +
     ggplot2::theme_minimal() +
     ggplot2::theme(
@@ -1664,16 +1816,28 @@ create_scatter_matrix = function(data, var_names, output_path,
       # Axis titles (x and y axis labels)
       axis.title = ggplot2::element_text(size = axis_title_size),
       
-      # Facet/strip labels
-      strip.text = ggplot2::element_text(size = strip_text_size),
+      # Facet/strip labels - FIXED: use ggplot2::margin() with proper namespace
+      strip.text = ggplot2::element_text(
+        size = strip_text_size,
+        face = "bold",
+        margin = ggplot2::margin(t = 2, b = 2)  # Fixed this line
+      ),
       
       # Panel grid settings
       panel.grid.minor = ggplot2::element_blank(),
       panel.grid.major = ggplot2::element_line(linewidth = 0.1),
       
       # Ensure consistent appearance across all panels
-      panel.spacing = grid::unit(0.5, "lines")
+      panel.spacing = grid::unit(0.5, "lines"),
+      
+      # Panel background
+      panel.background = ggplot2::element_rect(fill = "white", color = NA)
     )
+  
+  # Add title with correlation method info
+  p <- p + ggplot2::ggtitle(paste("Scatter Plot Matrix -", 
+                                  tools::toTitleCase(correlation_method), 
+                                  "Correlation"))
   
   # Create output directory if it doesn't exist
   output_dir <- dirname(output_path)
@@ -1692,15 +1856,19 @@ create_scatter_matrix = function(data, var_names, output_path,
   print(p)
   grDevices::dev.off()
   
+  # Informative message
   message("Scatter matrix saved to: ", output_path)
   message("Dimensions: ", width, " x ", height, " inches")
   message("Resolution: ", resolution, " dpi")
+  message("Correlation method: ", correlation_method)
   message("All axis ticks (left/right/bottom/top): ", axis_text_size, "pt")
   message("Axis titles: ", axis_title_size, "pt")
   message("Facet labels: ", strip_text_size, "pt")
+  message("Correlation decimal places: ", cor_digits)
   
   return(invisible(p))
 }
+
 
 ,
 create_correlation_plot = function(data, var_names, output_file, 
@@ -1764,11 +1932,32 @@ create_correlation_plot = function(data, var_names, output_file,
 }
   ,
 create_correlation_plot_sig = function(data, var_names, output_file, 
+                                       correlation_method = "pearson",
                                        width_inches = 8, height_inches = 8, 
-                                       dpi = 300, alpha = 0.05) {
+                                       dpi = 300, alpha = 0.05,
+                                       order_method = "hclust",
+                                       insig_method = "pch",
+                                       pch_color = "green",
+                                       pch_size = 3,
+                                       pch_symbol = 4) {
+  
   # Load required libraries
-  if (!require(corrplot)) {
+  if (!require(corrplot, quietly = TRUE)) {
     stop("corrplot package is required. Please install it using install.packages('corrplot')")
+  }
+  
+  # Validate correlation method
+  valid_methods <- c("pearson", "spearman", "kendall")
+  if (!correlation_method %in% valid_methods) {
+    stop("Invalid correlation_method. Choose from: ", 
+         paste(valid_methods, collapse = ", "))
+  }
+  
+  # Validate order method
+  valid_order_methods <- c("original", "AOE", "FPC", "hclust", "alphabet")
+  if (!order_method %in% valid_order_methods) {
+    stop("Invalid order_method. Choose from: ", 
+         paste(valid_order_methods, collapse = ", "))
   }
   
   # Validate inputs
@@ -1781,18 +1970,34 @@ create_correlation_plot_sig = function(data, var_names, output_file,
   # Subset data to selected variables
   plot_data <- data[, var_names, drop = FALSE]
   
-  # Calculate correlation matrix and p-values
-  cor_matrix <- cor(plot_data, use = "complete.obs")
+  # Remove non-numeric variables with warning
+  numeric_vars <- sapply(plot_data, is.numeric)
+  if (!all(numeric_vars)) {
+    non_numeric <- var_names[!numeric_vars]
+    warning("The following variables are not numeric and will be excluded: ",
+            paste(non_numeric, collapse = ", "))
+    var_names <- var_names[numeric_vars]
+    plot_data <- plot_data[, numeric_vars, drop = FALSE]
+  }
   
-  # Function to calculate correlation p-values
-  cor.mtest <- function(mat, ...) {
+  if (length(var_names) < 2) {
+    stop("At least 2 numeric variables are required for correlation analysis")
+  }
+  
+  # Calculate correlation matrix with specified method
+  cor_matrix <- cor(plot_data, 
+                    method = correlation_method, 
+                    use = "complete.obs")
+  
+  # Function to calculate correlation p-values with specified method
+  cor.mtest <- function(mat, method = correlation_method, ...) {
     mat <- as.matrix(mat)
     n <- ncol(mat)
     p.mat <- matrix(NA, n, n)
     diag(p.mat) <- 0
     for (i in 1:(n - 1)) {
       for (j in (i + 1):n) {
-        tmp <- cor.test(mat[, i], mat[, j], ...)
+        tmp <- cor.test(mat[, i], mat[, j], method = method, ...)
         p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
       }
     }
@@ -1800,8 +2005,8 @@ create_correlation_plot_sig = function(data, var_names, output_file,
     p.mat
   }
   
-  # Calculate p-value matrix
-  p_matrix <- cor.mtest(plot_data)
+  # Calculate p-value matrix with specified method
+  p_matrix <- cor.mtest(plot_data, method = correlation_method)
   
   # Create significance indicator matrix (TRUE = significant, FALSE = not significant)
   sig_matrix <- p_matrix <= alpha
@@ -1816,6 +2021,12 @@ create_correlation_plot_sig = function(data, var_names, output_file,
   width_pixels <- width_inches * dpi
   height_pixels <- height_inches * dpi
   
+  # Get correlation method symbol for title
+  cor_symbol <- switch(correlation_method,
+                       "pearson" = "r",
+                       "spearman" = "ρ", 
+                       "kendall" = "τ")
+  
   # Create the plot
   grDevices::png(
     filename = output_file,
@@ -1824,21 +2035,33 @@ create_correlation_plot_sig = function(data, var_names, output_file,
     res = dpi
   )
   
+  # Set up layout for title
+  layout_matrix <- matrix(c(1, 2), nrow = 2, ncol = 1)
+  layout(layout_matrix, heights = c(0.1, 0.9))
+  
+  # Add title
+  par(mar = c(0, 0, 0, 0))
+  plot.new()
+  text(0.5, 0.5, 
+       paste("Correlation Matrix (", tools::toTitleCase(correlation_method), " ", cor_symbol, ")", sep = ""),
+       cex = 1.5, font = 2)
+  
   # Create correlation plot with significance-based coloring
+  par(mar = c(0, 0, 1, 0))
   corrplot::corrplot(cor_matrix, 
                      method = "color", 
                      type = "upper", 
-                     order = "hclust", 
+                     order = order_method, 
                      tl.cex = 0.7, 
                      tl.col = "black",
                      addCoef.col = "black", 
                      number.cex = 0.6,
                      p.mat = p_matrix,           # Add p-value matrix
                      sig.level = alpha,          # Significance level
-                     insig = "pch",              # Use pch for non-significant correlations
-                     pch.col = "green",           # Pink color for non-significant crosses
-                     pch.cex = 3,                # 3 times bigger crosses
-                     pch = 4)                    # Cross symbol (X)
+                     insig = insig_method,       # Method for non-significant correlations
+                     pch.col = pch_color,        # Color for non-significant symbols
+                     pch.cex = pch_size,         # Size of symbols
+                     pch = pch_symbol)           # Symbol type
   
   grDevices::dev.off()
   
@@ -1846,22 +2069,39 @@ create_correlation_plot_sig = function(data, var_names, output_file,
   total_correlations <- sum(!is.na(cor_matrix[upper.tri(cor_matrix)]))
   significant_correlations <- sum(sig_matrix[upper.tri(sig_matrix)], na.rm = TRUE)
   
+  # Get descriptive statistics for correlations
+  cor_values <- cor_matrix[upper.tri(cor_matrix)]
+  cor_values <- cor_values[!is.na(cor_values)]
+  
   message("Correlation plot saved to: ", output_file)
   message("Dimensions: ", width_inches, " x ", height_inches, " inches")
   message("Resolution: ", dpi, " dpi")
+  message("Correlation method: ", correlation_method, " (", cor_symbol, ")")
   message("Variables included: ", paste(var_names, collapse = ", "))
   message("Correlation matrix dimensions: ", nrow(cor_matrix), " x ", ncol(cor_matrix))
   message("Significance level: α = ", alpha)
   message("Significant correlations: ", significant_correlations, " out of ", total_correlations, 
           " (", round(significant_correlations/total_correlations * 100, 1), "%)")
-  message("Non-significant correlations shown with pink crosses (3x size)")
+  message("Correlation statistics:")
+  message("  Range: [", round(min(cor_values), 3), ", ", round(max(cor_values), 3), "]")
+  message("  Mean |r|: ", round(mean(abs(cor_values)), 3))
+  message("  Median: ", round(median(cor_values), 3))
   
   return(invisible(list(
     correlation_matrix = cor_matrix,
     p_value_matrix = p_matrix,
-    significance_matrix = sig_matrix
+    significance_matrix = sig_matrix,
+    method = correlation_method,
+    summary = list(
+      total_correlations = total_correlations,
+      significant_correlations = significant_correlations,
+      percent_significant = round(significant_correlations/total_correlations * 100, 1),
+      correlation_range = range(cor_values),
+      mean_absolute_correlation = mean(abs(cor_values))
+    )
   )))
-}
+} 
+
 
 ,
 
@@ -3317,13 +3557,24 @@ KNN_reg = function(train_data, test_data, target_var, predictor_vars, k = 5) {
   return(result)
 }
 ,
-generate_correlation_plots_scatter = function(data, variables, pvalue = 0.05, 
-                                              threshold = 0.5, output_folder = "./correlation_plots",
-                                              width = 8, height = 6, dpi = 300) {
+generate_correlation_plots_scatter = function(data, variables, 
+                                              correlation_method = "pearson",
+                                              pvalue = 0.05, 
+                                              threshold = 0.5, 
+                                              output_folder = "./correlation_plots",
+                                              width = 8, height = 6, dpi = 300,
+                                              smooth_method = "lm") {   
   
   # Input validation
   if (!is.data.frame(data)) {
     stop("The 'data' argument must be a data frame")
+  }
+  
+  # Validate correlation method
+  valid_methods <- c("pearson", "spearman", "kendall")
+  if (!correlation_method %in% valid_methods) {
+    stop("Invalid correlation_method. Choose from: ", 
+         paste(valid_methods, collapse = ", "))
   }
   
   if (!all(variables %in% names(data))) {
@@ -3354,12 +3605,14 @@ generate_correlation_plots_scatter = function(data, variables, pvalue = 0.05,
     stop("At least 2 numeric variables are required for correlation analysis")
   }
   
-  # Calculate correlation matrix and p-values
-  cor_matrix <- cor(data_subset, use = "pairwise.complete.obs")
+  # Calculate correlation matrix with specified method
+  cor_matrix <- cor(data_subset, 
+                    method = correlation_method, 
+                    use = "pairwise.complete.obs")
   
-  # Function to calculate correlation p-values
-  cor_pvalue <- function(x, y) {
-    cor_test <- cor.test(x, y, use = "pairwise.complete.obs")
+  # Function to calculate correlation p-values with specified method
+  cor_pvalue <- function(x, y, method = correlation_method) {
+    cor_test <- cor.test(x, y, method = method, use = "pairwise.complete.obs")
     return(cor_test$p.value)
   }
   
@@ -3371,7 +3624,8 @@ generate_correlation_plots_scatter = function(data, variables, pvalue = 0.05,
     for (j in 1:length(variables)) {
       if (i != j) {
         pvalue_matrix[i, j] <- cor_pvalue(data_subset[[variables[i]]], 
-                                          data_subset[[variables[j]]])
+                                          data_subset[[variables[j]]],
+                                          method = correlation_method)
       }
     }
   }
@@ -3381,6 +3635,12 @@ generate_correlation_plots_scatter = function(data, variables, pvalue = 0.05,
   
   # Generate plots for significant correlations
   plot_count <- 0
+  
+  # Get correlation symbol for plot labels
+  cor_symbol <- switch(correlation_method,
+                       "pearson" = "r",
+                       "spearman" = "ρ", 
+                       "kendall" = "τ")
   
   for (i in 1:(length(variables)-1)) {
     for (j in (i+1):length(variables)) {
@@ -3392,14 +3652,16 @@ generate_correlation_plots_scatter = function(data, variables, pvalue = 0.05,
       # Check if correlation meets criteria
       if (!is.na(p_val) && p_val < pvalue && abs(cor_value) >= threshold) {
         
-        # Create plot
+        # Create plot - ALWAYS use linear regression for consistency
         p <- ggplot2::ggplot(data_subset, ggplot2::aes(x = .data[[var1]], y = .data[[var2]])) +
           ggplot2::geom_point(alpha = 0.6, size = 2) +
-          ggplot2::geom_smooth(method = "lm", se = TRUE, color = "red", linetype = "solid") +
+          ggplot2::geom_smooth(method = smooth_method,  # Use the specified smooth method
+                               se = TRUE, color = "red", linetype = "solid") +
           ggplot2::labs(
             title = paste("Correlation:", var1, "vs", var2),
-            subtitle = paste0("r = ", round(cor_value, 3), 
-                              ", p = ", format.pval(p_val, digits = 3)),
+            subtitle = paste0(cor_symbol, " = ", round(cor_value, 3), 
+                              ", p = ", format.pval(p_val, digits = 3),
+                              " (", correlation_method, ")"),
             x = var1,
             y = var2
           ) +
@@ -3409,9 +3671,10 @@ generate_correlation_plots_scatter = function(data, variables, pvalue = 0.05,
             plot.subtitle = ggplot2::element_text(size = 11, color = "darkred")
           )
         
-        # Create filename
+        # Create filename with method indication
         filename <- file.path(output_folder, 
-                              paste0("correlation_", var1, "_", var2, ".png"))
+                              paste0("correlation_", correlation_method, "_", 
+                                     var1, "_", var2, ".png"))
         
         # Save plot
         ggplot2::ggsave(
@@ -3431,6 +3694,7 @@ generate_correlation_plots_scatter = function(data, variables, pvalue = 0.05,
           Variable2 = var2,
           Correlation = cor_value,
           P_value = p_val,
+          Method = correlation_method,
           Plot_file = basename(filename),
           stringsAsFactors = FALSE
         ))
@@ -3439,11 +3703,15 @@ generate_correlation_plots_scatter = function(data, variables, pvalue = 0.05,
   }
   
   # Print summary
+  message("Correlation analysis completed using '", correlation_method, "' method")
+  message("Smoothing method used in plots: '", smooth_method, "'")
   if (plot_count == 0) {
     message("No correlations met the specified criteria (p < ", pvalue, 
-            " and |r| >= ", threshold, ")")
+            " and |", cor_symbol, "| >= ", threshold, ")")
   } else {
     message("Generated ", plot_count, " scatter plots in '", output_folder, "'")
+    message("Correlation threshold: |", cor_symbol, "| >= ", threshold)
+    message("Significance level: p < ", pvalue)
   }
   
   # Return results invisibly
