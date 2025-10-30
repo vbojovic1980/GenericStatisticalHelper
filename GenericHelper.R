@@ -2105,7 +2105,8 @@ create_correlation_plot_sig = function(data, var_names, output_file,
 
 ,
 
-analyze_strong_correlations = function(data, var_names, threshold = 0.7) {
+
+regression_models = function(data, var_names, threshold = 0.7, cor_method = "pearson") {
   # Load required libraries
   if (!require(dplyr)) {
     stop("dplyr package is required. Please install it using install.packages('dplyr')")
@@ -2122,16 +2123,23 @@ analyze_strong_correlations = function(data, var_names, threshold = 0.7) {
     stop("At least 2 variables are required for correlation analysis.")
   }
   
+  # Validate correlation method
+  valid_methods <- c("pearson", "kendall", "spearman")
+  if (!cor_method %in% valid_methods) {
+    stop("Invalid correlation method. Choose from: ", paste(valid_methods, collapse = ", "))
+  }
+  
   # Subset data to selected variables
   plot_data <- data[, var_names, drop = FALSE]
   
-  # Calculate correlation matrix
-  cor_matrix <- cor(plot_data, use = "complete.obs")
+  # Calculate correlation matrix with specified method
+  cor_matrix <- cor(plot_data, use = "complete.obs", method = cor_method)
   
   # Initialize results data frame
   results <- data.frame(
     var1 = character(),
     var2 = character(),
+    method = character(),
     r = numeric(),
     p_value_r = numeric(),
     a = numeric(),
@@ -2155,8 +2163,8 @@ analyze_strong_correlations = function(data, var_names, threshold = 0.7) {
         next
       }
       
-      # Get correlation and p-value
-      cor_test <- cor.test(clean_data[[var1]], clean_data[[var2]])
+      # Get correlation and p-value with specified method
+      cor_test <- cor.test(clean_data[[var1]], clean_data[[var2]], method = cor_method)
       r_value <- cor_test$estimate
       p_value_r <- cor_test$p.value
       
@@ -2176,6 +2184,7 @@ analyze_strong_correlations = function(data, var_names, threshold = 0.7) {
         results <- rbind(results, data.frame(
           var1 = var1,
           var2 = var2,
+          method = cor_method,
           r = round(r_value, 4),
           p_value_r = round(p_value_r, 6),
           a = round(a, 4),
@@ -2197,6 +2206,7 @@ analyze_strong_correlations = function(data, var_names, threshold = 0.7) {
   # Print summary
   message("Analysis complete!")
   message("Variables analyzed: ", paste(var_names, collapse = ", "))
+  message("Correlation method: ", cor_method)
   message("Correlation threshold: |r| >= ", threshold)
   message("Strong correlations found: ", nrow(results))
   
@@ -2212,6 +2222,8 @@ analyze_strong_correlations = function(data, var_names, threshold = 0.7) {
   
   return(results)
 }
+
+
 ,
 create_regression_plot = function(data, var_x, var_y, 
                                   output_file, width_inches = 8, height_inches = 6, 
