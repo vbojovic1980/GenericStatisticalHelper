@@ -4043,6 +4043,448 @@ xgboost_model = function(train_data, test_data, target_var, input_vars,
   
   return(result)
 }
+,
+
+dnn_model = function(train_data, test_data, target_var, input_vars, 
+                     layers = c(64, 32), activation = "relu", dropout = 0.2,
+                     learning_rate = 0.001, epochs = 100, batch_size = 32,
+                     validation_split = 0.2, regression = TRUE, verbose = 0) {
+  get_variable_importance <- function(model, feature_names) {
+    tryCatch({
+      # Get weights from first layer
+      weights <- get_weights(model)[[1]]
+      # Calculate importance as mean absolute weight
+      importance <- apply(abs(weights), 1, mean)
+      names(importance) <- feature_names
+      return(sort(importance, decreasing = TRUE))
+    }, error = function(e) {
+      return(NULL)
+    })
+  }
+  # Prepare data for neural network
+  prepare_nn_data <- function(data, target_var, input_vars, regression) {
+    # Scale features (important for neural networks)
+    x_data <- as.matrix(data[, input_vars])
+    
+    # Scale to 0-1 range
+    x_scaled <- scale(x_data)
+    
+    if (regression) {
+      y_data <- data[[target_var]]
+      # Scale target for regression
+      y_mean <- mean(y_data, na.rm = TRUE)
+      y_sd <- sd(y_data, na.rm = TRUE)
+      y_scaled <- (y_data - y_mean) / y_sd
+      return(list(x = x_scaled, y = y_scaled, y_stats = c(y_mean, y_sd)))
+    } else {
+      # For classification, convert to appropriate format
+      y_data <- data[[target_var]]
+      if (length(unique(y_data)) == 2) {
+        # Binary classification - convert to 0/1
+        y_encoded <- as.numeric(y_data) - 1
+        return(list(x = x_scaled, y = y_encoded, y_levels = levels(y_data)))
+      } else {
+        # Multi-class classification - one-hot encoding
+        y_encoded <- to_categorical(as.numeric(y_data) - 1)
+        return(list(x = x_scaled, y = y_encoded, y_levels = levels(y_data)))
+      }
+    }
+  }
+  
+  # Prepare train and test data
+  train_prep <- prepare_nn_data(train_data, target_var, input_vars, regression)
+  test_prep <- prepare_nn_data(test_data, target_var, input_vars, regression)
+  
+  # Get input shape
+  input_shape <- ncol(train_prep$x)
+  
+  # Build model
+  model <- keras_model_sequential()
+  
+  # Input layer
+  model %>% 
+    layer_dense(units = layers[1], activation = activation, input_shape = input_shape)
+  
+  # Add dropout if specified
+  if (dropout > 0) {
+    model %>% layer_dropout(rate = dropout)
+  }
+  
+  # Additional hidden layers
+  if (length(layers) > 1) {
+    for (i in 2:length(layers)) {
+      model %>% layer_dense(units = layers[i], activation = activation)
+      if (dropout > 0) {
+        model %>% layer_dropout(rate = dropout)
+      }
+    }
+  }
+  
+  # Output layer
+  if (regression) {
+    model %>% layer_dense(units = 1, activation = "linear")
+  } else {
+    if (length(unique(train_data[[target_var]])) == 2) {
+      # Binary classification
+      model %>% layer_dense(units = 1, activation = "sigmoid")
+    } else {
+      # Multi-class classification
+      model %>% layer_dense(units = length(unique(train_data[[target_var]])), 
+                            activation = "softmax")
+    }
+  }
+  
+  # Compile model
+  if (regression) {
+    model %>% compile(
+      loss = "mse",
+      optimizer = optimizer_adam(learning_rate = learning_rate),
+      metrics = c("mae")
+    )
+  } else {
+    model %>% compile(
+      loss = if (length(unique(train_data[[target_var]])) == 2) "binary_crossentropy" else "categorical_crossentropy",
+      optimizer = optimizer_adam(learning_rate = learning_rate),
+      metrics = c("accuracy")
+    )
+  }
+  
+  # Set up early stopping
+  early_stop <- callback_early_stopping(
+    monitor = "val_loss",
+    patience = 10,
+    restore_best_weights = TRUE
+  )
+  
+  # Train model
+  history <- model %>% fit(
+    x = train_prep$x,
+    y = train_prep$y,
+    epochs = epochs,
+    batch_size = batch_size,
+    validation_split = validation_split,
+    callbacks = list(early_stop),
+    verbose = verbose
+  )
+  
+  # Make predictions
+  raw_predictions <- predict(model, test_prep$x)
+  
+  # Process predictions based on problem type
+  if (regression) {
+    # Rescale predictions back to original scale
+    predictions <- raw_predictions * test_prep$y_stats[2] + test_prep$y_stats[1]
+  } else {
+    if (length(unique(train_data[[target_var]])) == 2) {
+      # Binary classification
+      predictions <- ifelse(raw_predictions > 0.5, 1, 0)
+      predictions <- factor(predictions, levels = c(0, 1), 
+                            labels = test_prep$y_levels)
+    } else {
+      # Multi-class classification
+      predictions <- factor(max.col(raw_predictions), 
+                            levels = 1:length(test_prep$y_levels),
+                            labels = test_prep$y_levels)
+    }
+  }
+  
+  # Get actual values
+  actual <- test_data[[target_var]]
+  
+  # Calculate comprehensive performance metrics
+  if (regression) {
+    # Remove NA values for calculation
+    valid_idx <- !is.na(actual) & !is.na(predictions)
+    actual_clean <- actual[valid_idx]
+    predicted_clean <- predictions[valid_idx]
+    
+    # Regression metrics
+    residuals <- actual_clean - predicted_clean
+    mae <- mean(abs(residuals))
+    rmse <- sqrt(mean(residuals^2))
+    r_squared <- cor(actual_clean, predicted_clean)^2
+    mape <- mean(abs(residuals / actual_clean)) * 100
+    mean_error <- mean(residuals)
+    median_ae <- median(abs(residuals))
+    
+    metrics <- list(
+      MAE = mae,
+      RMSE = rmse,
+      R_squared = r_squared,
+      MAPE = mape,
+      Mean_Error = mean_error,
+      Median_AE = median_ae,
+      Bias_Direction = ifelse(mean_error > 0, "Under-predicting", "Over-predicting"),
+      Predictions = data.frame(
+        Actual = actual, 
+        Predicted = predictions,
+        Residuals = actual - predictions
+      ),
+      Training_History = history
+    )
+    
+  } else {
+    # Classification metrics
+    confusion_matrix <- confusionMatrix(predictions, actual)
+    
+    # Calculate AUC for binary classification
+    auc_value <- NA
+    if (length(unique(actual)) == 2) {
+      tryCatch({
+        roc_obj <- roc(actual, as.numeric(predictions))
+        auc_value <- auc(roc_obj)
+      }, error = function(e) {
+        auc_value <- NA
+      })
+    }
+    
+    metrics <- list(
+      Confusion_Matrix = confusion_matrix,
+      Accuracy = confusion_matrix$overall["Accuracy"],
+      Kappa = confusion_matrix$overall["Kappa"],
+      Sensitivity = confusion_matrix$byClass["Sensitivity"],
+      Specificity = confusion_matrix$byClass["Specificity"],
+      F1_Score = confusion_matrix$byClass["F1"],
+      AUC = auc_value,
+      Predictions = data.frame(Actual = actual, Predicted = predictions),
+      Training_History = history
+    )
+  }
+  
+  # Get variable importance (approximate using connection weights)
+  variable_importance <- get_variable_importance(model, input_vars)
+  
+  # Return results
+  result <- list(
+    model = model,
+    predictions = predictions,
+    metrics = metrics,
+    variable_importance = variable_importance,
+    parameters = list(
+      layers = layers,
+      activation = activation,
+      dropout = dropout,
+      learning_rate = learning_rate,
+      epochs = epochs,
+      batch_size = batch_size,
+      validation_split = validation_split,
+      regression = regression,
+      n_predictors = length(input_vars)
+    ),
+    data_info = list(
+      train_size = nrow(train_data),
+      test_size = nrow(test_data),
+      target_variable = target_var
+    ),
+    scaling_info = list(
+      input_means = attr(train_prep$x, "scaled:center"),
+      input_sds = attr(train_prep$x, "scaled:scale")
+    )
+  )
+  
+  return(result)
+}
+,
+knn_model = function(train_data, test_data, target_var, input_vars, 
+                     k = 5, scale_data = TRUE, regression = TRUE, 
+                     tune_k = FALSE, tune_length = 10) {
+  
+  # Prepare data for KNN
+  prepare_knn_data <- function(data, target_var, input_vars, scale_data) {
+    x_data <- as.matrix(data[, input_vars])
+    y_data <- data[[target_var]]
+    
+    if (scale_data) {
+      # Scale features (important for KNN)
+      x_scaled <- scale(x_data)
+      return(list(x = x_scaled, y = y_data, 
+                  center = attr(x_scaled, "scaled:center"),
+                  scale = attr(x_scaled, "scaled:scale")))
+    } else {
+      return(list(x = x_data, y = y_data))
+    }
+  }
+  
+  # Prepare train and test data
+  train_prep <- prepare_knn_data(train_data, target_var, input_vars, scale_data)
+  test_prep <- prepare_knn_data(test_data, target_var, input_vars, scale_data)
+  
+  # If scaling was applied to train, apply same scaling to test
+  if (scale_data && !is.null(train_prep$center)) {
+    test_prep$x <- scale(test_prep$x, 
+                         center = train_prep$center, 
+                         scale = train_prep$scale)
+  }
+  
+  # Tune k if requested
+  if (tune_k) {
+    if (regression) {
+      # For regression, use custom tuning
+      k_values <- seq(1, min(tune_length, nrow(train_data) %/% 2), by = 2)
+      cv_results <- data.frame()
+      
+      for (k_val in k_values) {
+        # Simple cross-validation
+        set.seed(123)
+        cv_folds <- createFolds(train_prep$y, k = 5)
+        cv_errors <- c()
+        
+        for (fold in cv_folds) {
+          train_fold_x <- train_prep$x[-fold, ]
+          train_fold_y <- train_prep$y[-fold]
+          test_fold_x <- train_prep$x[fold, ]
+          test_fold_y <- train_prep$y[fold]
+          
+          pred <- FNN::knn.reg(train = train_fold_x, 
+                               test = test_fold_x, 
+                               y = train_fold_y, 
+                               k = k_val)$pred
+          cv_errors <- c(cv_errors, sqrt(mean((pred - test_fold_y)^2)))
+        }
+        
+        cv_results <- rbind(cv_results, 
+                            data.frame(k = k_val, RMSE = mean(cv_errors)))
+      }
+      
+      best_k <- cv_results$k[which.min(cv_results$RMSE)]
+      
+    } else {
+      # For classification, use caret's built-in tuning
+      ctrl <- trainControl(method = "cv", number = 5)
+      tune_grid <- expand.grid(k = seq(1, min(tune_length, nrow(train_data) %/% 2), by = 2))
+      
+      knn_tune <- train(x = train_prep$x,
+                        y = train_prep$y,
+                        method = "knn",
+                        trControl = ctrl,
+                        tuneGrid = tune_grid,
+                        preProcess = if(scale_data) c("center", "scale") else NULL)
+      
+      best_k <- knn_tune$bestTune$k
+      cv_results <- knn_tune$results
+    }
+  } else {
+    best_k <- k
+    cv_results <- NULL
+  }
+  
+  # Train final KNN model and make predictions
+  if (regression) {
+    knn_pred <- FNN::knn.reg(train = train_prep$x, 
+                             test = test_prep$x, 
+                             y = train_prep$y, 
+                             k = best_k)
+    predictions <- knn_pred$pred
+  } else {
+    knn_pred <- FNN::knn(train = train_prep$x, 
+                         test = test_prep$x, 
+                         cl = train_prep$y, 
+                         k = best_k,
+                         prob = TRUE)
+    predictions <- knn_pred
+  }
+  
+  # Get actual values
+  actual <- test_data[[target_var]]
+  
+  # Calculate comprehensive performance metrics
+  if (regression) {
+    # Remove NA values for calculation
+    valid_idx <- !is.na(actual) & !is.na(predictions)
+    actual_clean <- actual[valid_idx]
+    predicted_clean <- predictions[valid_idx]
+    
+    # Regression metrics
+    residuals <- actual_clean - predicted_clean
+    mae <- mean(abs(residuals))
+    rmse <- sqrt(mean(residuals^2))
+    r_squared <- cor(actual_clean, predicted_clean)^2
+    mape <- mean(abs(residuals / actual_clean)) * 100
+    mean_error <- mean(residuals)
+    median_ae <- median(abs(residuals))
+    
+    metrics <- list(
+      MAE = mae,
+      RMSE = rmse,
+      R_squared = r_squared,
+      MAPE = mape,
+      Mean_Error = mean_error,
+      Median_AE = median_ae,
+      Bias_Direction = ifelse(mean_error > 0, "Under-predicting", "Over-predicting"),
+      Predictions = data.frame(
+        Actual = actual, 
+        Predicted = predictions,
+        Residuals = actual - predictions
+      )
+    )
+    
+  } else {
+    # Classification metrics
+    confusion_matrix <- confusionMatrix(predictions, actual)
+    
+    # Calculate AUC for binary classification
+    auc_value <- NA
+    if (length(unique(actual)) == 2) {
+      tryCatch({
+        prob_attr <- attr(predictions, "prob")
+        # Adjust probabilities for the winning class
+        adjusted_probs <- ifelse(predictions == levels(actual)[1], 
+                                 1 - prob_attr, prob_attr)
+        roc_obj <- roc(actual, adjusted_probs)
+        auc_value <- auc(roc_obj)
+      }, error = function(e) {
+        auc_value <- NA
+      })
+    }
+    
+    metrics <- list(
+      Confusion_Matrix = confusion_matrix,
+      Accuracy = confusion_matrix$overall["Accuracy"],
+      Kappa = confusion_matrix$overall["Kappa"],
+      Sensitivity = confusion_matrix$byClass["Sensitivity"],
+      Specificity = confusion_matrix$byClass["Specificity"],
+      F1_Score = confusion_matrix$byClass["F1"],
+      AUC = auc_value,
+      Predictions = data.frame(Actual = actual, Predicted = predictions)
+    )
+  }
+  
+  # Store scaling information
+  scaling_info <- if (scale_data) {
+    list(center = train_prep$center, scale = train_prep$scale)
+  } else {
+    NULL
+  }
+  
+  # Return results
+  result <- list(
+    model = list(
+      train_x = train_prep$x,
+      train_y = train_prep$y,
+      k = best_k,
+      scaling_info = scaling_info,
+      input_vars = input_vars,
+      regression = regression
+    ),
+    predictions = predictions,
+    metrics = metrics,
+    tuning_results = cv_results,
+    parameters = list(
+      k = best_k,
+      scale_data = scale_data,
+      regression = regression,
+      tuned = tune_k,
+      n_predictors = length(input_vars)
+    ),
+    data_info = list(
+      train_size = nrow(train_data),
+      test_size = nrow(test_data),
+      target_variable = target_var
+    )
+  )
+  
+  return(result)
+}
 
   )
 )
