@@ -1,6 +1,3 @@
-# GenericStatisticalHelper
-Just automatizing some statistical methods
-
 # GenericHelper R6 Class
 
 A comprehensive R6 class providing statistical analysis, visualization, and machine learning methods for data science workflows.
