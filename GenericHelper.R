@@ -3729,6 +3729,320 @@ generate_correlation_plots_scatter = function(data, variables,
   # Return results invisibly
   invisible(results)
 }
+,
+
+random_forest_model = function(train_data, test_data, target_var, input_vars, 
+                               ntree = 500, mtry = NULL, regression = TRUE) {
+  
+  # Create formula
+  formula <- as.formula(paste(target_var, "~", paste(input_vars, collapse = " + ")))
+  
+  # Set mtry if not provided
+  if (is.null(mtry)) {
+    mtry <- if (regression) max(floor(length(input_vars)/3), 1) else floor(sqrt(length(input_vars)))
+  }
+  
+  # Train Random Forest model
+  if (regression) {
+    model <- randomForest(
+      formula,
+      data = train_data,
+      ntree = ntree,
+      mtry = mtry,
+      importance = TRUE,
+      na.action = na.omit
+    )
+  } else {
+    model <- randomForest(
+      formula,
+      data = train_data,
+      ntree = ntree,
+      mtry = mtry,
+      importance = TRUE,
+      na.action = na.omit
+    )
+  }
+  
+  # Make predictions on test set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Get actual values
+  actual <- test_data[[target_var]]
+  
+  # Calculate comprehensive performance metrics
+  if (regression) {
+    # Remove NA values for calculation
+    valid_idx <- !is.na(actual) & !is.na(predictions)
+    actual_clean <- actual[valid_idx]
+    predicted_clean <- predictions[valid_idx]
+    
+    # Regression metrics
+    residuals <- actual_clean - predicted_clean
+    mae <- mean(abs(residuals))
+    rmse <- sqrt(mean(residuals^2))
+    r_squared <- cor(actual_clean, predicted_clean)^2
+    mape <- mean(abs(residuals / actual_clean)) * 100  # Mean Absolute Percentage Error
+    mean_error <- mean(residuals)  # Bias
+    median_ae <- median(abs(residuals))
+    
+    metrics <- list(
+      MAE = mae,
+      RMSE = rmse,
+      R_squared = r_squared,
+      MAPE = mape,
+      Mean_Error = mean_error,
+      Median_AE = median_ae,
+      Bias_Direction = ifelse(mean_error > 0, "Under-predicting", "Over-predicting"),
+      Predictions = data.frame(
+        Actual = actual, 
+        Predicted = predictions,
+        Residuals = actual - predictions
+      ),
+      Correlation_Test = cor.test(actual_clean, predicted_clean),
+      Summary = data.frame(
+        Metric = c("RMSE", "MAE", "R²", "MAPE", "Mean_Error", "Median_AE"),
+        Value = c(rmse, mae, r_squared, mape, mean_error, median_ae)
+      )
+    )
+    
+  } else {
+    # Classification metrics
+    confusion_matrix <- confusionMatrix(predictions, actual)
+    
+    # Calculate AUC for binary classification
+    auc_value <- NA
+    if (length(unique(actual)) == 2) {
+      tryCatch({
+        roc_obj <- roc(actual, as.numeric(predictions))
+        auc_value <- auc(roc_obj)
+      }, error = function(e) {
+        auc_value <- NA
+      })
+    }
+    
+    metrics <- list(
+      Confusion_Matrix = confusion_matrix,
+      Accuracy = confusion_matrix$overall["Accuracy"],
+      Kappa = confusion_matrix$overall["Kappa"],
+      Sensitivity = confusion_matrix$byClass["Sensitivity"],
+      Specificity = confusion_matrix$byClass["Specificity"],
+      F1_Score = confusion_matrix$byClass["F1"],
+      AUC = auc_value,
+      Predictions = data.frame(Actual = actual, Predicted = predictions),
+      Class_Proportions = list(
+        Actual = prop.table(table(actual)),
+        Predicted = prop.table(table(predictions))
+      )
+    )
+  }
+  
+  # Get variable importance
+  var_importance <- importance(model)
+  
+  # Return results
+  result <- list(
+    model = model,
+    predictions = predictions,
+    metrics = metrics,
+    variable_importance = var_importance,
+    parameters = list(
+      ntree = ntree,
+      mtry = mtry,
+      regression = regression,
+      n_predictors = length(input_vars)
+    ),
+    data_info = list(
+      train_size = nrow(train_data),
+      test_size = nrow(test_data),
+      target_variable = target_var
+    )
+  )
+  
+  return(result)
+}
+,
+xgboost_model = function(train_data, test_data, target_var, input_vars, 
+                         nrounds = 100, params = NULL, regression = TRUE, 
+                         cv_folds = 5) {
+  
+  # Prepare data for XGBoost
+  prepare_xgb_data <- function(data, target_var, input_vars) {
+    # Convert to matrix (XGBoost requires numeric matrix)
+    x_data <- as.matrix(data[, input_vars])
+    
+    if (regression) {
+      y_data <- data[[target_var]]
+    } else {
+      # Convert factor to numeric (0-indexed)
+      y_data <- as.numeric(data[[target_var]]) - 1
+    }
+    
+    return(list(x = x_data, y = y_data))
+  }
+  
+  # Prepare train and test data
+  train_prep <- prepare_xgb_data(train_data, target_var, input_vars)
+  test_prep <- prepare_xgb_data(test_data, target_var, input_vars)
+  
+  # Set default parameters if not provided
+  if (is.null(params)) {
+    if (regression) {
+      params <- list(
+        objective = "reg:squarederror",
+        max_depth = 6,
+        eta = 0.1,
+        gamma = 0,
+        colsample_bytree = 0.8,
+        min_child_weight = 1,
+        subsample = 0.8
+      )
+    } else {
+      params <- list(
+        objective = "binary:logistic",
+        max_depth = 6,
+        eta = 0.1,
+        gamma = 0,
+        colsample_bytree = 0.8,
+        min_child_weight = 1,
+        subsample = 0.8
+      )
+    }
+  }
+  
+  # Create DMatrix objects (XGBoost native format)
+  dtrain <- xgb.DMatrix(data = train_prep$x, label = train_prep$y)
+  dtest <- xgb.DMatrix(data = test_prep$x, label = test_prep$y)
+  
+  # Use cross-validation to find optimal nrounds
+  cv_result <- xgb.cv(
+    params = params,
+    data = dtrain,
+    nrounds = nrounds,
+    nfold = cv_folds,
+    metrics = if(regression) "rmse" else "error",
+    early_stopping_rounds = 10,
+    verbose = FALSE
+  )
+  
+  # Get optimal number of rounds
+  best_nrounds <- if (!is.null(cv_result$best_iteration)) {
+    cv_result$best_iteration
+  } else {
+    nrounds
+  }
+  
+  # Train final model
+  model <- xgb.train(
+    params = params,
+    data = dtrain,
+    nrounds = best_nrounds,
+    watchlist = list(train = dtrain, test = dtest),
+    verbose = 0
+  )
+  
+  # Make predictions
+  if (regression) {
+    predictions <- predict(model, dtest)
+  } else {
+    pred_probs <- predict(model, dtest)
+    predictions <- ifelse(pred_probs > 0.5, 1, 0)
+    # Convert back to original factor levels
+    predictions <- factor(predictions, levels = c(0, 1), 
+                          labels = levels(train_data[[target_var]]))
+  }
+  
+  # Get actual values
+  actual <- test_data[[target_var]]
+  
+  # Calculate comprehensive performance metrics
+  if (regression) {
+    # Remove NA values for calculation
+    valid_idx <- !is.na(actual) & !is.na(predictions)
+    actual_clean <- actual[valid_idx]
+    predicted_clean <- predictions[valid_idx]
+    
+    # Regression metrics
+    residuals <- actual_clean - predicted_clean
+    mae <- mean(abs(residuals))
+    rmse <- sqrt(mean(residuals^2))
+    r_squared <- cor(actual_clean, predicted_clean)^2
+    mape <- mean(abs(residuals / actual_clean)) * 100
+    mean_error <- mean(residuals)
+    median_ae <- median(abs(residuals))
+    
+    metrics <- list(
+      MAE = mae,
+      RMSE = rmse,
+      R_squared = r_squared,
+      MAPE = mape,
+      Mean_Error = mean_error,
+      Median_AE = median_ae,
+      Bias_Direction = ifelse(mean_error > 0, "Under-predicting", "Over-predicting"),
+      Predictions = data.frame(
+        Actual = actual, 
+        Predicted = predictions,
+        Residuals = actual - predictions
+      ),
+      CV_Results = cv_result,
+      Best_Iteration = best_nrounds
+    )
+    
+  } else {
+    # Classification metrics
+    confusion_matrix <- confusionMatrix(predictions, actual)
+    
+    # Calculate AUC for binary classification
+    auc_value <- NA
+    if (length(unique(actual)) == 2) {
+      tryCatch({
+        roc_obj <- roc(actual, as.numeric(predictions))
+        auc_value <- auc(roc_obj)
+      }, error = function(e) {
+        auc_value <- NA
+      })
+    }
+    
+    metrics <- list(
+      Confusion_Matrix = confusion_matrix,
+      Accuracy = confusion_matrix$overall["Accuracy"],
+      Kappa = confusion_matrix$overall["Kappa"],
+      Sensitivity = confusion_matrix$byClass["Sensitivity"],
+      Specificity = confusion_matrix$byClass["Specificity"],
+      F1_Score = confusion_matrix$byClass["F1"],
+      AUC = auc_value,
+      Predictions = data.frame(Actual = actual, Predicted = predictions),
+      CV_Results = cv_result,
+      Best_Iteration = best_nrounds
+    )
+  }
+  
+  # Get variable importance
+  importance_matrix <- xgb.importance(
+    feature_names = input_vars, 
+    model = model
+  )
+  
+  # Return results
+  result <- list(
+    model = model,
+    predictions = predictions,
+    metrics = metrics,
+    variable_importance = importance_matrix,
+    parameters = list(
+      nrounds = best_nrounds,
+      params = params,
+      regression = regression,
+      n_predictors = length(input_vars)
+    ),
+    data_info = list(
+      train_size = nrow(train_data),
+      test_size = nrow(test_data),
+      target_variable = target_var
+    )
+  )
+  
+  return(result)
+}
 
   )
 )
