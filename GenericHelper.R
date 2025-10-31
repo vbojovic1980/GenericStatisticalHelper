@@ -4943,5 +4943,105 @@ suport_vector_regression_model = function(train_data, test_data, target_var, inp
   
   return(result)
 }
+,
+gbm_model = function(train_data, test_data, target_var, input_vars, 
+                      n_trees = 100, interaction_depth = 3, shrinkage = 0.1,
+                      regression = TRUE) {
+  
+  library(gbm)
+  library(caret)
+  
+  # Create formula
+  formula <- as.formula(paste(target_var, "~", paste(input_vars, collapse = " + ")))
+  
+  # Train GBM model
+  if (regression) {
+    model <- gbm(
+      formula,
+      data = train_data,
+      distribution = "gaussian",
+      n.trees = n_trees,
+      interaction.depth = interaction_depth,
+      shrinkage = shrinkage,
+      cv.folds = 5,
+      verbose = FALSE
+    )
+    
+    # Find optimal number of trees
+    best_trees <- gbm.perf(model, method = "cv", plot.it = FALSE)
+    
+  } else {
+    model <- gbm(
+      formula,
+      data = train_data,
+      distribution = "bernoulli",
+      n.trees = n_trees,
+      interaction.depth = interaction_depth,
+      shrinkage = shrinkage,
+      cv.folds = 5,
+      verbose = FALSE
+    )
+    
+    best_trees <- gbm.perf(model, method = "cv", plot.it = FALSE)
+  }
+  
+  # Make predictions
+  predictions <- predict(model, test_data, n.trees = best_trees)
+  
+  # Get actual values
+  actual <- test_data[[target_var]]
+  
+  # Calculate metrics
+  if (regression) {
+    valid_idx <- !is.na(actual) & !is.na(predictions)
+    actual_clean <- actual[valid_idx]
+    predicted_clean <- predictions[valid_idx]
+    
+    residuals <- actual_clean - predicted_clean
+    mae <- mean(abs(residuals))
+    rmse <- sqrt(mean(residuals^2))
+    r_squared <- cor(actual_clean, predicted_clean)^2
+    
+    metrics <- list(
+      MAE = mae,
+      RMSE = rmse,
+      R_squared = r_squared,
+      Best_Trees = best_trees,
+      Predictions = data.frame(Actual = actual, Predicted = predictions)
+    )
+  } else {
+    # For classification, convert probabilities to classes
+    class_predictions <- ifelse(predictions > 0.5, 
+                                levels(actual)[2], 
+                                levels(actual)[1])
+    class_predictions <- factor(class_predictions, levels = levels(actual))
+    
+    confusion_matrix <- confusionMatrix(class_predictions, actual)
+    metrics <- list(
+      Confusion_Matrix = confusion_matrix,
+      Accuracy = confusion_matrix$overall["Accuracy"],
+      Predictions = data.frame(Actual = actual, 
+                               Predicted = class_predictions,
+                               Probability = predictions)
+    )
+  }
+  
+  # Get variable importance
+  var_importance <- summary(model, plotit = FALSE)
+  
+  return(list(
+    model = model,
+    predictions = predictions,
+    metrics = metrics,
+    variable_importance = var_importance,
+    parameters = list(
+      n_trees = best_trees,
+      interaction_depth = interaction_depth,
+      shrinkage = shrinkage,
+      regression = regression
+    )
+  ))
+}
+
   )
 )
