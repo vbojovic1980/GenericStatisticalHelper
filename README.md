@@ -1,398 +1,440 @@
-# GenericHelper R6 Class
+# GenericHelper R6 Class Documentation
 
 A comprehensive R6 class providing statistical analysis, visualization, and machine learning methods for data science workflows.
 
-## Methods Overview
-
-### 1. Correlation & Regression Analysis
-
-#### `correlations_and_regressions()`
-Comprehensive correlation analysis with visualization and regression modeling.
-
-**Parameters:**
-- `data`: Data frame with numeric variables
-- `outFolder`: Output directory for results
-- `filePrefix`: Prefix for output files
-- `cor_threshold`: Correlation threshold
-- `p_threshold`: P-value threshold
-- `min_observations`: Minimum observations required
-- `plot_width`, `plot_height`, `plot_res`: Plot dimensions and resolution
-
-**Results:**
-- Correlation matrices (CSV)
-- P-value matrices (CSV)
-- Regression results (CSV)
-- Multiple visualization plots (correlation matrix, heatmap, network plot, regression plots)
-
-#### `correlation_variable_selection()`
-Feature selection based on correlation analysis.
-
-**Parameters:**
-- `df`: Data frame containing variables
-- `variables`: Character vector of variable names
-- `correlation_method`: "pearson", "spearman", or "kendall"
-- `threshold`: Correlation threshold
-- `alpha`: Significance level
-- `use_method`: Method for handling missing values
-
-**Results:**
-- `removed_vars`: Variables removed due to high correlation
-- `remaining_vars`: Variables retained
-- `similar_vars`: Mapping of removed variables to similar ones
-- Summary statistics of reduction
-
-#### `generate_correlation_plots_scatter()`
-Generate scatter plots for significant correlations.
-
-**Parameters:**
-- `data`: Input data frame
-- `variables`: Variables to analyze
-- `correlation_method`: Correlation method
-- `pvalue`: P-value threshold
-- `threshold`: Correlation threshold
-- `output_folder`: Output directory
-- `width`, `height`, `dpi`: Plot specifications
-- `smooth_method`: Smoothing method for plots
-
-**Results:**
-- Individual scatter plots for significant correlations
-- Results data frame with correlation statistics
-
-### 2. Visualization Methods
-
-#### `create_group_boxplots_overview()`
-Create overview of boxplots grouped by a categorical variable.
-
-**Parameters:**
-- `df`: Input data frame
-- `output_folder`: Output directory
-- `group_var`: Grouping variable
-- `target_vars`: Target variables to plot
-- `dpi`, `width`, `height`: Plot specifications
-
-**Results:**
-- Combined boxplot overview PNG file
-- Grid layout optimized for number of variables
-
-#### `create_variable_boxplots_overview()`
-Create overview of ungrouped boxplots for multiple variables.
-
-**Parameters:**
-- `df`: Input data frame
-- `output_file`: Output file path
-- `target_vars`: Target variables to plot
-- `dpi`, `width`, `height`: Plot specifications
-
-**Results:**
-- Combined boxplot overview PNG file
-
-#### `create_individual_boxplots()`
-Create individual boxplot files for each variable.
-
-**Parameters:**
-- `df`: Input data frame
-- `output_folder`: Output directory
-- `group_var`: Optional grouping variable
-- `target_vars`: Target variables
-- `dpi`, `width`, `height`: Plot specifications
-
-**Results:**
-- Individual PNG files for each variable
-- List of created file paths
-
-#### `create_individual_histograms()`
-Create individual histogram files for each variable.
-
-**Parameters:**
-- `df`: Input data frame
-- `output_folder`: Output directory
-- `group_var`: Optional grouping variable
-- `target_vars`: Target variables
-- `dpi`, `width`, `height`: Plot specifications
-- `bins`: Number of histogram bins
-
-**Results:**
-- Individual histogram PNG files
-- List of created file paths
-
-#### `create_histograms_overview()`
-Create overview of histograms for multiple variables.
-
-**Parameters:**
-- `df`: Input data frame
-- `output_file`: Output file path
-- `target_vars`: Target variables
-- `dpi`, `width`, `height`: Plot specifications
-- `bins`: Number of histogram bins
-
-**Results:**
-- Combined histogram overview PNG file
-
-#### `create_scatter_matrix()`
-Create scatter plot matrix with correlation coefficients.
-
-**Parameters:**
-- `data`: Input data frame
-- `var_names`: Variables to include
-- `output_path`: Output file path
-- `correlation_method`: Correlation method
-- `resolution`, `width`, `height`: Plot specifications
-- Various text size and display parameters
-
-**Results:**
-- Scatter matrix PNG file with correlations
-- Invisible plot object
-
-#### `create_correlation_plot()`
-Create correlation matrix visualization.
-
-**Parameters:**
-- `data`: Input data frame
-- `var_names`: Variables to include
-- `output_file`: Output file path
-- `width_inches`, `height_inches`, `dpi`: Plot specifications
-
-**Results:**
-- Correlation plot PNG file
-- Correlation matrix
-
-#### `create_correlation_plot_sig()`
-Create correlation matrix with significance indicators.
-
-**Parameters:**
-- `data`: Input data frame
-- `var_names`: Variables to include
-- `output_file`: Output file path
-- `correlation_method`: Correlation method
-- `width_inches`, `height_inches`, `dpi`: Plot specifications
-- `alpha`: Significance level
-- Various display parameters for non-significant correlations
-
-**Results:**
-- Enhanced correlation plot with significance
-- Comprehensive statistics and matrices
-
-### 3. Statistical Tests
-
-#### `regression_models()`
-Perform regression analysis for highly correlated variable pairs.
-
-**Parameters:**
-- `data`: Input data frame
-- `var_names`: Variables to analyze
-- `threshold`: Correlation threshold
-- `cor_method`: Correlation method
-
-**Results:**
-- Data frame with regression results
-- Correlation coefficients and p-values
-- Regression coefficients and statistics
-
-#### `create_regression_plot()`
-Create individual regression plot for variable pairs.
-
-**Parameters:**
-- `data`: Input data frame
-- `var_x`, `var_y`: Variables for regression
-- `output_file`: Output file path
-- `width_inches`, `height_inches`, `dpi`: Plot specifications
-
-**Results:**
-- Regression plot PNG file
-- Regression statistics and model
-
-#### `shapiro_test_comprehensive()`
-Comprehensive normality testing using Shapiro-Wilk test.
-
-**Parameters:**
-- `data`: Input data frame
-- `variables`: Variables to test (default: all numeric)
-- `alpha`: Significance level
-
-**Results:**
-- Data frame with normality test results
-- Additional statistics (mean, SD, skewness, kurtosis)
-- Normality classification
-
-#### `kruskal_wallis_comprehensive()`
-Comprehensive Kruskal-Wallis non-parametric ANOVA.
-
-**Parameters:**
-- `data`: Input data frame
-- `iv_vars`: Independent (grouping) variables
-- `dv_vars`: Dependent variables
-- `alpha`: Significance level
-- `posthoc`: Whether to perform post-hoc tests
-- `effect_size`: Whether to calculate effect size
-
-**Results:**
-- Data frame with test results
-- Optional post-hoc comparisons and effect sizes
-- Significance indicators
-
-#### `dunn_tests()`
-Perform Dunn's post-hoc tests for Kruskal-Wallis.
-
-**Parameters:**
-- `data`: Input data frame
-- `dv_names`: Dependent variables
-- `iv_names`: Independent variables
-- `method`: P-value adjustment method
-- `alpha`: Significance level
-
-**Results:**
-- Data frame with Dunn's test results
-- Pairwise comparisons with adjusted p-values
-- Kruskal-Wallis statistics
-
-#### `permanova()`
-PERMANOVA for multivariate analysis.
-
-**Parameters:**
-- `data`: Input data frame
-- `dv_vars`: Dependent variables (multivariate)
-- `iv_vars`: Independent variables
-- `permutations`: Number of permutations
-
-**Results:**
-- PERMANOVA results data frame
-- Multivariate F-statistics and p-values
-
-### 4. Clustering & Machine Learning
-
-#### `hierarchical_clustering_plot()`
-Hierarchical clustering with visualization.
-
-**Parameters:**
-- `data_frame`: Input data frame
-- `var_names`: Variables for clustering
-- `data_label_var`: Variable for labels
-- `distance_method`: Distance metric
-- `output_file`: Output file path
-- `width`, `height`, `dpi`: Plot specifications
-- `linkage_method`: Clustering linkage method
-- `num_clusters`: Number of clusters (auto-detected if NULL)
-- Various display parameters
-
-**Results:**
-- Dendrogram PNG file
-- Cluster assignments and model objects
-
-#### `binarize_variables_by_mean()`
-Binarize numeric variables based on mean threshold.
-
-**Parameters:**
-- `data_frame`: Input data frame
-- `var_names`: Variables to binarize
-- `suffix`: Suffix for new binary variables
-- `na_action`: How to handle NA values
-
-**Results:**
-- Modified data frame with binary variables
-- Means summary as attribute
-
-#### `generate_c50_tree()`
-Generate C5.0 decision tree with visualization.
-
-**Parameters:**
-- `data_frame`: Input data frame
-- `input_var_names`: Predictor variables
-- `target_var_name`: Target variable
-- `output_png_file`: Output file path
-- `width_inches`, `height_inches`, `dpi`: Plot specifications
-
-**Results:**
-- Decision tree PNG file
-- C5.0 and rpart models
-- Accuracy and variable importance
-
-#### `random_forest()`
-Random Forest implementation with visualization.
-
-**Parameters:**
-- `data_frame`: Input data frame
-- `input_var_names`: Predictor variables
-- `target_var_name`: Target variable
-- `output_png_file`: Output file path
-- `width_inches`, `height_inches`, `dpi`: Plot specifications
-- `ntree`: Number of trees
-
-**Results:**
-- Random Forest model
-- Error rate and variable importance plots
-- OOB error statistics
-
-#### `KNN_label()`
-K-Nearest Neighbors for classification.
-
-**Parameters:**
-- `train_data`: Training data
-- `test_data`: Test data
-- `target_var`: Target variable
-- `predictor_vars`: Predictor variables
-- `k`: Number of neighbors
-- `l`: Minimum vote threshold
-
-**Results:**
-- Predictions and probabilities
-- Accuracy and confusion matrix
-- Comprehensive classification metrics
-
-#### `KNN_reg()`
-K-Nearest Neighbors for regression.
-
-**Parameters:**
-- `train_data`: Training data
-- `test_data`: Test data
-- `target_var`: Target variable
-- `predictor_vars`: Predictor variables
-- `k`: Number of neighbors
-
-**Results:**
-- Predictions and residuals
-- Regression metrics (MSE, RMSE, MAE, R-squared)
-- Comprehensive regression results
-
-### 5. Utility Methods
-
-#### `minmax_normalize()`
-Min-max normalization of a vector.
-
-**Parameters:**
-- `x`: Numeric vector to normalize
-
-**Results:**
-- Normalized vector between 0 and 1
-
-#### `normalized_variance()`
-Calculate variance of min-max normalized data.
-
-**Parameters:**
-- `x`: Numeric vector
-
-**Results:**
-- Variance of normalized data
-
-#### `filter_variables_usingXY()`
-Filter variables based on correlation with target variables.
-
-**Parameters:**
-- `data`: Input data frame
-- `y_vars`: Target variables
-- `x_vars`: Predictor variables to filter
-- `cor_threshold`: Correlation threshold
-- `pvalue_threshold`: P-value threshold
-
-**Results:**
-- Lists of removed and remaining variables
-- Filtering criteria summary
-
-#### `get_fingerprint_maccs_binary()**
-Generate MACCS fingerprints from SMILES strings.
-
-**Parameters:**
-- `smiles`: SMILES string
-
-**Results:**
-- Binary fingerprint string and vector
-- Fingerprint length information
+## Statistical Analysis Methods
+
+### correlations_and_regressions
+Performs comprehensive correlation analysis and regression modeling between numeric variables with automated visualization and reporting.
+
+**Arguments:**
+- data: Input data frame
+- outFolder: Output directory path
+- filePrefix: Prefix for output files
+- cor_threshold: Minimum correlation coefficient threshold
+- p_threshold: Statistical significance threshold
+- min_observations: Minimum observations required for analysis
+- plot_width, plot_height, plot_res: Visualization dimensions and resolution
+
+**Returns:** List containing correlation matrices, regression results, file paths, and analysis summary
+
+### correlation_variable_selection
+Performs correlation-based feature selection to remove highly correlated variables while preserving variance.
+
+**Arguments:**
+- df: Input data frame
+- variables: Character vector of variable names to analyze
+- correlation_method: Correlation calculation method ("pearson", "spearman", "kendall")
+- threshold: Correlation threshold for variable removal
+- alpha: Statistical significance level
+- use_method: Missing value handling method
+
+**Returns:** List with removed variables, remaining variables, similarity mappings, and selection summary
+
+### shapiro_test_comprehensive
+Performs Shapiro-Wilk normality tests on multiple variables with comprehensive descriptive statistics.
+
+**Arguments:**
+- data: Input data frame
+- variables: Variables to test (defaults to all numeric variables)
+- alpha: Significance level for normality assessment
+
+**Returns:** Data frame with test statistics, p-values, normality classification, and descriptive statistics
+
+### kruskal_wallis_comprehensive
+Performs Kruskal-Wallis tests for multiple independent and dependent variable combinations with optional post-hoc analysis.
+
+**Arguments:**
+- data: Input data frame
+- iv_vars: Independent (grouping) variables
+- dv_vars: Dependent variables
+- alpha: Significance level
+- posthoc: Boolean for post-hoc test execution
+- effect_size: Boolean for effect size calculation
+
+**Returns:** Data frame with test statistics, p-values, group counts, and significance indicators
+
+### dunn_tests
+Performs Dunn's post-hoc tests following Kruskal-Wallis analysis for pairwise group comparisons.
+
+**Arguments:**
+- data: Input data frame
+- dv_names: Dependent variable names
+- iv_names: Independent variable names
+- method: P-value adjustment method
+- alpha: Significance level
+
+**Returns:** Data frame with pairwise comparison results, z-values, and adjusted p-values
+
+### permanova
+Performs Permutational Multivariate Analysis of Variance (PERMANOVA) for multivariate data analysis.
+
+**Arguments:**
+- data: Input data frame
+- dv_vars: Multivariate response variables
+- iv_vars: Independent variables
+- permutations: Number of permutations for significance testing
+
+**Returns:** PERMANOVA results data frame with variance components and significance tests
+
+## Data Visualization Methods
+
+### create_group_boxplots_overview
+Creates comprehensive boxplot overviews grouped by categorical variables with automated layout optimization.
+
+**Arguments:**
+- df: Input data frame
+- output_folder: Output directory path
+- group_var: Grouping variable name
+- target_vars: Target variables for visualization
+- dpi, width, height: Plot resolution and dimensions
+
+**Returns:** Combined boxplot visualization with group legends
+
+### create_variable_boxplots_overview
+Generates overview of ungrouped boxplots for multiple variables in grid layout.
+
+**Arguments:**
+- df: Input data frame
+- output_file: Output file path
+- target_vars: Variables to visualize
+- dpi, width, height: Plot specifications
+
+**Returns:** Multi-panel boxplot visualization
+
+### create_individual_boxplots
+Creates individual boxplot files for each specified variable with grouping options.
+
+**Arguments:**
+- df: Input data frame
+- output_folder: Output directory
+- group_var: Optional grouping variable
+- target_vars: Variables to plot
+- dpi, width, height: Plot parameters
+
+**Returns:** List of created file paths
+
+### create_individual_histograms
+Generates individual histogram files for specified variables with grouping capabilities.
+
+**Arguments:**
+- df: Input data frame
+- output_folder: Output directory
+- group_var: Optional grouping variable
+- target_vars: Variables for histogram creation
+- dpi, width, height, bins: Plot specifications
+
+**Returns:** List of generated histogram file paths
+
+### create_histograms_overview
+Creates multi-panel histogram overview for rapid variable distribution assessment.
+
+**Arguments:**
+- df: Input data frame
+- output_file: Output file path
+- target_vars: Variables to include
+- dpi, width, height, bins: Visualization parameters
+
+**Returns:** Combined histogram grid visualization
+
+### create_scatter_matrix
+Generates scatter plot matrix with correlation coefficients and distribution diagnostics.
+
+**Arguments:**
+- data: Input data frame
+- var_names: Variables to include in matrix
+- output_path: Output file path
+- correlation_method: Correlation calculation method
+- Various styling and formatting parameters
+
+**Returns:** Comprehensive scatter matrix plot
+
+### create_correlation_plot
+Creates correlation matrix visualization using corrplot package.
+
+**Arguments:**
+- data: Input data frame
+- var_names: Variables for correlation analysis
+- output_file: Output file path
+- width_inches, height_inches, dpi: Plot dimensions
+
+**Returns:** Correlation matrix plot and matrix object
+
+### create_correlation_plot_sig
+Generates significance-highlighted correlation matrix with statistical testing.
+
+**Arguments:**
+- data: Input data frame
+- var_names: Variables to analyze
+- output_file: Output file path
+- correlation_method: Correlation calculation method
+- Various significance and styling parameters
+
+**Returns:** Enhanced correlation plot with significance indicators and summary statistics
+
+### generate_correlation_plots_scatter
+Creates individual scatter plots for significant correlations with regression lines.
+
+**Arguments:**
+- data: Input data frame
+- variables: Variables to analyze
+- correlation_method: Correlation calculation method
+- pvalue, threshold: Significance criteria
+- output_folder: Output directory
+- Various plot customization parameters
+
+**Returns:** Data frame of significant correlation results and generated plot files
+
+## Machine Learning Methods
+
+### generate_c50_tree
+Implements C5.0 decision tree algorithm with comprehensive visualization and model assessment.
+
+**Arguments:**
+- data_frame: Input data frame
+- input_var_names: Predictor variables
+- target_var_name: Target variable
+- output_png_file: Visualization output path
+- width_inches, height_inches, dpi: Plot dimensions
+
+**Returns:** List containing C5.0 and rpart models, accuracy metrics, and variable importance
+
+### random_forest
+Trains random forest models with error rate visualization and variable importance analysis.
+
+**Arguments:**
+- data_frame: Input data frame
+- input_var_names: Predictor variables
+- target_var_name: Target variable
+- output_png_file: Output visualization path
+- width_inches, height_inches, dpi: Plot specifications
+- ntree: Number of trees in forest
+
+**Returns:** Random forest model object with performance metrics
+
+### random_forest_model
+Comprehensive random forest implementation with detailed performance metrics and validation.
+
+**Arguments:**
+- train_data: Training dataset
+- test_data: Testing dataset
+- target_var: Target variable name
+- input_vars: Predictor variables
+- ntree: Number of trees
+- mtry: Variables sampled at each split
+- regression: Boolean for regression vs classification
+
+**Returns:** Comprehensive model results including predictions, metrics, and variable importance
+
+### xgboost_model
+Extreme Gradient Boosting implementation with cross-validation and advanced performance tracking.
+
+**Arguments:**
+- train_data: Training dataset
+- test_data: Testing dataset
+- target_var: Target variable
+- input_vars: Predictor variables
+- nrounds: Boosting iterations
+- params: XGBoost parameters
+- regression: Regression or classification mode
+- cv_folds: Cross-validation folds
+
+**Returns:** XGBoost model with performance metrics, variable importance, and CV results
+
+### dnn_model
+Deep Neural Network implementation using Keras/TensorFlow backend with comprehensive configuration.
+
+**Arguments:**
+- train_data: Training dataset
+- test_data: Testing dataset
+- target_var: Target variable
+- input_vars: Predictor variables
+- layers: Hidden layer architecture
+- activation: Activation functions
+- dropout: Regularization parameters
+- Various training hyperparameters
+
+**Returns:** DNN model with training history, predictions, metrics, and variable importance
+
+### knn_model
+K-Nearest Neighbors implementation with automatic parameter tuning and scaling options.
+
+**Arguments:**
+- train_data: Training dataset
+- test_data: Testing dataset
+- target_var: Target variable
+- input_vars: Predictor variables
+- k: Number of neighbors
+- scale_data: Feature scaling flag
+- regression: Regression or classification mode
+- tune_k: Automatic parameter tuning
+
+**Returns:** KNN model results with performance metrics and tuning information
+
+### extra_trees_ranger
+Extremely Randomized Trees implementation using ranger package with advanced tuning capabilities.
+
+**Arguments:**
+- train_data: Training dataset
+- test_data: Testing dataset
+- target_var: Target variable
+- input_vars: Predictor variables
+- ntree: Number of trees
+- mtry: Variable sampling parameter
+- min_node_size: Tree stopping criterion
+- Various algorithm-specific parameters
+
+**Returns:** Extra Trees model with comprehensive performance assessment
+
+### svm_model
+Support Vector Machine implementation with multiple kernel options and comprehensive metrics.
+
+**Arguments:**
+- train_data: Training dataset
+- test_data: Testing dataset
+- target_var: Target variable
+- input_vars: Predictor variables
+- kernel: SVM kernel type
+- cost, gamma: Model parameters
+- scale: Feature scaling flag
+- regression: Regression or classification mode
+
+**Returns:** SVM model with performance metrics and predictions
+
+### suport_vector_regression_model
+Support Vector Regression implementation with epsilon-insensitive loss function.
+
+**Arguments:**
+- train_data: Training dataset
+- test_data: Testing dataset
+- target_var: Target variable
+- input_vars: Predictor variables
+- kernel: SVR kernel type
+- cost, gamma, epsilon: Model parameters
+- scale: Feature scaling flag
+
+**Returns:** SVR model with regression metrics and residual analysis
+
+### svm_rf_ensemble
+Hybrid ensemble model combining Support Vector Machine and Random Forest predictions.
+
+**Arguments:**
+- train_data: Training dataset
+- test_data: Testing dataset
+- target_var: Target variable
+- input_vars: Predictor variables
+- regression: Problem type flag
+- ntree: Number of trees in RF component
+
+**Returns:** Ensemble model with individual and combined predictions
+
+## Data Preprocessing Methods
+
+### minmax_normalize
+Performs min-max normalization on numeric vectors to [0,1] range.
+
+**Arguments:**
+- x: Numeric vector for normalization
+
+**Returns:** Normalized vector with preserved structure
+
+### normalized_variance
+Calculates variance on min-max normalized data for scale-invariant dispersion measurement.
+
+**Arguments:**
+- x: Numeric vector for analysis
+
+**Returns:** Normalized variance value
+
+### binarize_variables_by_mean
+Converts continuous variables to binary based on mean thresholding.
+
+**Arguments:**
+- data_frame: Input data frame
+- var_names: Variables to binarize
+- suffix: Naming suffix for new variables
+- na_action: Missing value handling strategy
+
+**Returns:** Data frame with added binary variables and summary statistics
+
+### filter_variables_usingXY
+Filters predictor variables based on correlation with target variables and significance.
+
+**Arguments:**
+- data: Input data frame
+- y_vars: Target variables
+- x_vars: Predictor candidates
+- cor_threshold: Correlation threshold
+- pvalue_threshold: Statistical significance threshold
+
+**Returns:** Filtered variable list with removal reasons and summary
+
+## Specialized Analytical Methods
+
+### hierarchical_clustering_plot
+Performs hierarchical clustering with dendrogram visualization and cluster analysis.
+
+**Arguments:**
+- data_frame: Input data frame
+- var_names: Variables for clustering
+- data_label_var: Observation labeling variable
+- distance_method: Distance calculation method
+- Various clustering and visualization parameters
+
+**Returns:** Clustering results, dendrogram, and cluster assignments
+
+### get_fingerprint_maccs_binary
+Converts SMILES strings to MACCS molecular fingerprints in binary representation.
+
+**Arguments:**
+- smiles: SMILES string input
+
+**Returns:** Binary fingerprint representation with structural information
+
+### KNN_label
+K-Nearest Neighbors classification implementation with probability estimates.
+
+**Arguments:**
+- train_data: Training dataset
+- test_data: Testing dataset
+- target_var: Classification target
+- predictor_vars: Feature variables
+- k: Number of neighbors
+- l: Decision threshold parameter
+
+**Returns:** Classification results with probabilities and performance metrics
+
+### KNN_reg
+K-Nearest Neighbors regression implementation with comprehensive error metrics.
+
+**Arguments:**
+- train_data: Training dataset
+- test_data: Testing dataset
+- target_var: Regression target
+- predictor_vars: Feature variables
+- k: Number of neighbors
+
+**Returns:** Regression results with predictions and error analysis
+
+### regression_models
+Performs automated regression analysis on highly correlated variable pairs.
+
+**Arguments:**
+- data: Input data frame
+- var_names: Variables for analysis
+- threshold: Correlation threshold
+- cor_method: Correlation calculation method
+
+**Returns:** Data frame of regression results with coefficients and significance
+
+### create_regression_plot
+Creates detailed scatter plots with regression lines and statistical annotations.
+
+**Arguments:**
+- data: Input data frame
+- var_x: Independent variable
+- var_y: Dependent variable
+- output_file: Output path
+- Plot dimension parameters
+
+**Returns:** Regression visualization with model statistics and equation
