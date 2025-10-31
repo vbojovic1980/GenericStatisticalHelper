@@ -1,3 +1,11 @@
+# GenericHelper R6 Class
+# MIT License
+# 
+# Dependencies:
+# This class uses multiple R packages including but not limited to:
+# - C50, randomForest, xgboost, ggplot2, dplyr, caret, etc.
+# See library() calls in source for complete list.
+
 library(BART)
 library(C50) 
 library(car)

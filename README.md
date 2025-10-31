@@ -6,6 +6,18 @@ A comprehensive R6 class providing statistical analysis, visualization, and mach
 source("https://raw.githubusercontent.com/vbojovic1980/GenericStatisticalHelper/main/GenericHelper.R")
 gh=GenericHelper$new()
 ```
+
+## Dependencies
+
+This library uses the following R packages:
+- C50
+- randomForest  
+- xgboost
+- ggplot2
+- [etc...]
+
+See the full list in the source code.
+
 ## Statistical Analysis Methods
 
 ### correlations_and_regressions
