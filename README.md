@@ -442,3 +442,79 @@ Creates detailed scatter plots with regression lines and statistical annotations
 - Plot dimension parameters
 
 **Returns:** Regression visualization with model statistics and equation
+
+
+## Gradient Boosting Methods
+
+### gbm_model
+**Description**: Implements Gradient Boosting Machine (GBM) algorithm for regression and classification tasks with cross-validation for optimal tree selection.
+
+**Arguments**:
+- `train_data`: Training dataset
+- `test_data`: Testing dataset  
+- `target_var`: Target variable name
+- `input_vars`: Predictor variables
+- `n_trees`: Number of boosting iterations
+- `interaction_depth`: Maximum depth of variable interactions
+- `shrinkage`: Learning rate
+- `regression`: Boolean for regression vs classification
+
+**Returns**: GBM model with performance metrics, variable importance, and optimal tree count
+
+### bart_model
+**Description**: Bayesian Additive Regression Trees (BART) implementation for non-parametric Bayesian modeling with uncertainty quantification.
+
+**Arguments**:
+- `train_data`: Training dataset
+- `test_data`: Testing dataset
+- `target_var`: Target variable name
+- `input_vars`: Predictor variables
+- `n_tree`: Number of trees in the sum
+- `n_iter`: Number of posterior samples
+- `n_burn`: Number of burn-in iterations
+
+**Returns**: BART model with posterior predictions, performance metrics, and variable importance
+
+## Regularized Regression Methods
+
+### elastic_net_model
+**Description**: Elastic Net regularization combining L1 (Lasso) and L2 (Ridge) penalties with automatic lambda tuning.
+
+**Arguments**:
+- `train_data`: Training dataset
+- `test_data`: Testing dataset
+- `target_var`: Target variable name
+- `input_vars`: Predictor variables
+- `alpha`: Elastic net mixing parameter (0=Ridge, 1=Lasso)
+- `tune_lambda`: Boolean for automatic lambda parameter tuning
+
+**Returns**: Elastic Net model with coefficients, performance metrics, and regularization parameters
+
+### pls_model
+**Description**: Partial Least Squares regression for high-dimensional data with automatic component selection.
+
+**Arguments**:
+- `train_data`: Training dataset
+- `test_data`: Testing dataset
+- `target_var`: Target variable name
+- `input_vars`: Predictor variables
+- `ncomp`: Number of PLS components
+- `scale`: Boolean for variable scaling
+
+**Returns**: PLS model with loadings, performance metrics, and optimal component count
+
+## Rule-Based Methods
+
+### cubist_model
+**Description**: Cubist model combining rule-based models with linear models for interpretable regression.
+
+**Arguments**:
+- `train_data`: Training dataset
+- `test_data`: Testing dataset
+- `target_var`: Target variable name
+- `input_vars`: Predictor variables
+- `committees`: Number of model committees
+- `neighbors`: Number of nearest neighbors for adjustment
+
+**Returns**: Cubist model with rule-based predictions, performance metrics, and variable usage statistics
+
