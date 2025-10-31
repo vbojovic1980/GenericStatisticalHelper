@@ -1,3 +1,4 @@
+library(BART)
 library(C50) 
 library(car)
 #library(caret)
@@ -18,11 +19,13 @@ if (!require("GGally")) install.packages("GGally")
 library(GGally)
 library(ggpubr)
 library(ggplot2) 
+library(glmnet)
 library(glmmTMB)
 library(PMCMRplus)
 library(moments)
 library(openxlsx)
 library(partykit)
+library(pls)
 library(purrr)
 library(PMCMRplus)
 library(R6)
@@ -5042,6 +5045,182 @@ gbm_model = function(train_data, test_data, target_var, input_vars,
     )
   ))
 }
-
+,
+bart_model = function(train_data, test_data, target_var, input_vars,
+                      n_tree = 50, n_iter = 1000, n_burn = 250) {
+  
+  library(BART)
+  
+  # Prepare data
+  train_x <- train_data[, input_vars]
+  train_y <- train_data[[target_var]]
+  test_x <- test_data[, input_vars]
+  
+  # Convert to BART format
+  x_train <- as.matrix(train_x)
+  y_train <- as.numeric(train_y)
+  x_test <- as.matrix(test_x)
+  
+  # Train BART model
+  model <- wbart(x_train, y_train, x_test,
+                 ntree = n_tree,
+                 nskip = n_burn,
+                 ndpost = n_iter)
+  
+  # Get predictions (posterior mean)
+  predictions <- colMeans(model$yhat.test)
+  
+  # Calculate metrics
+  actual <- test_data[[target_var]]
+  valid_idx <- !is.na(actual) & !is.na(predictions)
+  actual_clean <- actual[valid_idx]
+  predicted_clean <- predictions[valid_idx]
+  
+  residuals <- actual_clean - predicted_clean
+  mae <- mean(abs(residuals))
+  rmse <- sqrt(mean(residuals^2))
+  r_squared <- cor(actual_clean, predicted_clean)^2
+  
+  metrics <- list(
+    MAE = mae,
+    RMSE = rmse,
+    R_squared = r_squared,
+    Predictions = data.frame(Actual = actual, Predicted = predictions)
+  )
+  
+  # Get variable importance
+  var_importance <- colMeans(model$varcount)
+  names(var_importance) <- input_vars
+  
+  return(list(
+    model = model,
+    predictions = predictions,
+    metrics = metrics,
+    variable_importance = var_importance,
+    parameters = list(
+      n_tree = n_tree,
+      n_iter = n_iter,
+      n_burn = n_burn
+    )
+  ))
+}
+,
+elastic_net_model = function(train_data, test_data, target_var, input_vars,
+                              alpha = 0.5, tune_lambda = TRUE) {
+  
+  library(glmnet)
+  library(caret)
+  
+  # Prepare data
+  train_x <- as.matrix(train_data[, input_vars])
+  train_y <- train_data[[target_var]]
+  test_x <- as.matrix(test_data[, input_vars])
+  
+  # Train Elastic Net with cross-validation
+  if (tune_lambda) {
+    cv_model <- cv.glmnet(train_x, train_y, alpha = alpha)
+    best_lambda <- cv_model$lambda.min
+  } else {
+    cv_model <- glmnet(train_x, train_y, alpha = alpha)
+    best_lambda <- cv_model$lambda[length(cv_model$lambda)]  # Most regularized
+  }
+  
+  # Final model
+  model <- glmnet(train_x, train_y, alpha = alpha, lambda = best_lambda)
+  
+  # Make predictions
+  predictions <- predict(model, test_x)
+  
+  # Calculate metrics
+  actual <- test_data[[target_var]]
+  valid_idx <- !is.na(actual) & !is.na(predictions)
+  actual_clean <- actual[valid_idx]
+  predicted_clean <- predictions[valid_idx]
+  
+  residuals <- actual_clean - predicted_clean
+  mae <- mean(abs(residuals))
+  rmse <- sqrt(mean(residuals^2))
+  r_squared <- cor(actual_clean, predicted_clean)^2
+  
+  metrics <- list(
+    MAE = mae,
+    RMSE = rmse,
+    R_squared = r_squared,
+    Predictions = data.frame(Actual = actual, Predicted = predictions)
+  )
+  
+  # Get coefficients
+  coefficients <- coef(model)
+  
+  return(list(
+    model = model,
+    predictions = predictions,
+    metrics = metrics,
+    coefficients = coefficients,
+    parameters = list(
+      alpha = alpha,
+      lambda = best_lambda
+    )
+  ))
+}
+,
+pls_model = function(train_data, test_data, target_var, input_vars,
+                     ncomp = NULL, scale = TRUE) {
+  
+  library(pls)
+  library(caret)
+  
+  # Create formula
+  formula <- as.formula(paste(target_var, "~", paste(input_vars, collapse = " + ")))
+  
+  # Train PLS model
+  model <- plsr(
+    formula,
+    data = train_data,
+    scale = scale,
+    validation = "CV"
+  )
+  
+  # Find optimal components if not specified
+  if (is.null(ncomp)) {
+    ncomp <- which.min(RMSEP(model)$val[1,,]) - 1
+  }
+  
+  # Make predictions
+  predictions <- predict(model, test_data, ncomp = ncomp)[,,1]
+  
+  # Calculate metrics
+  actual <- test_data[[target_var]]
+  valid_idx <- !is.na(actual) & !is.na(predictions)
+  actual_clean <- actual[valid_idx]
+  predicted_clean <- predictions[valid_idx]
+  
+  residuals <- actual_clean - predicted_clean
+  mae <- mean(abs(residuals))
+  rmse <- sqrt(mean(residuals^2))
+  r_squared <- cor(actual_clean, predicted_clean)^2
+  
+  metrics <- list(
+    MAE = mae,
+    RMSE = rmse,
+    R_squared = r_squared,
+    Best_Components = ncomp,
+    Predictions = data.frame(Actual = actual, Predicted = predictions)
+  )
+  
+  # Get variable importance (loadings)
+  loadings <- model$loadings[, 1:ncomp]
+  
+  return(list(
+    model = model,
+    predictions = predictions,
+    metrics = metrics,
+    loadings = loadings,
+    parameters = list(
+      ncomp = ncomp,
+      scale = scale
+    )
+  ))
+}
   )
 )
