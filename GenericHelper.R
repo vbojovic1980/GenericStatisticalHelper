@@ -10,6 +10,7 @@ library(dunn.test)
 library(fingerprint) 
 if (!require("devtools")) install.packages("devtools")
 library(dplyr) 
+library(e1071)
 library(FactoMineR)
 library(factoextra)
 library(FNN)
@@ -4651,6 +4652,218 @@ extra_trees_ranger = function(train_data, test_data, target_var, input_vars,
   )
   
   return(result)
+}
+,
+svm_model = function(train_data, test_data, target_var, input_vars, 
+                      kernel = "radial", cost = 1, gamma = "auto",
+                      scale = TRUE, regression = TRUE) {
+  
+  library(e1071)
+  library(caret)
+  
+  # Create formula
+  formula <- as.formula(paste(target_var, "~", paste(input_vars, collapse = " + ")))
+  
+  # Set automatic gamma if not specified
+  if (gamma == "auto") {
+    n_features <- length(input_vars)
+    gamma <- 1 / n_features  # Common default for automatic gamma
+  }
+  
+  # Train SVM model
+  if (regression) {
+    model <- svm(
+      formula,
+      data = train_data,
+      type = "eps-regression",
+      kernel = kernel,
+      cost = cost,
+      gamma = gamma,
+      scale = scale
+    )
+  } else {
+    model <- svm(
+      formula,
+      data = train_data,
+      type = "C-classification",
+      kernel = kernel,
+      cost = cost,
+      gamma = gamma,
+      probability = TRUE,
+      scale = scale
+    )
+  }
+  
+  # Make predictions
+  predictions <- predict(model, test_data)
+  
+  # Get actual values
+  actual <- test_data[[target_var]]
+  
+  # Calculate comprehensive performance metrics
+  if (regression) {
+    valid_idx <- !is.na(actual) & !is.na(predictions)
+    actual_clean <- actual[valid_idx]
+    predicted_clean <- predictions[valid_idx]
+    
+    residuals <- actual_clean - predicted_clean
+    mae <- mean(abs(residuals))
+    rmse <- sqrt(mean(residuals^2))
+    r_squared <- cor(actual_clean, predicted_clean)^2
+    mape <- mean(abs(residuals / actual_clean)) * 100
+    mean_error <- mean(residuals)
+    
+    metrics <- list(
+      MAE = mae,
+      RMSE = rmse,
+      R_squared = r_squared,
+      MAPE = mape,
+      Mean_Error = mean_error,
+      Bias_Direction = ifelse(mean_error > 0, "Under-predicting", "Over-predicting"),
+      Predictions = data.frame(
+        Actual = actual, 
+        Predicted = predictions,
+        Residuals = actual - predictions
+      )
+    )
+    
+  } else {
+    confusion_matrix <- confusionMatrix(predictions, actual)
+    
+    auc_value <- NA
+    if (length(unique(actual)) == 2) {
+      tryCatch({
+        pred_probs <- attr(predict(model, test_data, probability = TRUE), "probabilities")[, 2]
+        roc_obj <- roc(actual, pred_probs)
+        auc_value <- auc(roc_obj)
+      }, error = function(e) {
+        auc_value <- NA
+      })
+    }
+    
+    metrics <- list(
+      Confusion_Matrix = confusion_matrix,
+      Accuracy = confusion_matrix$overall["Accuracy"],
+      Kappa = confusion_matrix$overall["Kappa"],
+      Sensitivity = confusion_matrix$byClass["Sensitivity"],
+      Specificity = confusion_matrix$byClass["Specificity"],
+      F1_Score = confusion_matrix$byClass["F1"],
+      AUC = auc_value,
+      Predictions = data.frame(Actual = actual, Predicted = predictions)
+    )
+  }
+  
+  # Return results
+  result <- list(
+    model = model,
+    predictions = predictions,
+    metrics = metrics,
+    parameters = list(
+      kernel = kernel,
+      cost = cost,
+      gamma = gamma,
+      scale = scale,
+      regression = regression
+    ),
+    data_info = list(
+      train_size = nrow(train_data),
+      test_size = nrow(test_data),
+      target_variable = target_var
+    )
+  )
+  
+  return(result)
+}
+,
+svm_rf_ensemble = function(train_data, test_data, target_var, input_vars, 
+                            regression = TRUE, ntree=500) {
+  
+  library(e1071)
+  library(randomForest)
+  library(caret)
+  
+  # Train SVM model
+  if (regression) {
+    svm_model <- svm(
+      x = train_data[, input_vars],
+      y = train_data[[target_var]],
+      type = "eps-regression",
+      kernel = "radial"
+    )
+  } else {
+    svm_model <- svm(
+      x = train_data[, input_vars],
+      y = train_data[[target_var]],
+      type = "C-classification",
+      kernel = "radial",
+      probability = TRUE
+    )
+  }
+  
+  # Train Random Forest model
+  rf_model <- randomForest(
+    x = train_data[, input_vars],
+    y = train_data[[target_var]],
+    ntree = ntree,
+    importance = TRUE
+  )
+  
+  # Make predictions from both models
+  svm_pred <- predict(svm_model, test_data[, input_vars])
+  rf_pred <- predict(rf_model, test_data[, input_vars])
+  
+  # Simple average ensemble
+  if (regression) {
+    ensemble_pred <- (svm_pred + rf_pred) / 2
+  } else {
+    # For classification, use voting
+    ensemble_pred <- ifelse((as.numeric(svm_pred) + as.numeric(rf_pred)) > 2.5, 
+                            levels(train_data[[target_var]])[2],
+                            levels(train_data[[target_var]])[1])
+    ensemble_pred <- factor(ensemble_pred, levels = levels(train_data[[target_var]]))
+  }
+  
+  # Calculate metrics
+  actual <- test_data[[target_var]]
+  
+  if (regression) {
+    residuals <- actual - ensemble_pred
+    mae <- mean(abs(residuals))
+    rmse <- sqrt(mean(residuals^2))
+    r_squared <- cor(actual, ensemble_pred)^2
+    
+    metrics <- list(
+      MAE = mae,
+      RMSE = rmse,
+      R_squared = r_squared,
+      Ensemble_Predictions = data.frame(
+        Actual = actual,
+        SVM = svm_pred,
+        RF = rf_pred,
+        Ensemble = ensemble_pred
+      )
+    )
+  } else {
+    confusion_matrix <- confusionMatrix(ensemble_pred, actual)
+    metrics <- list(
+      Confusion_Matrix = confusion_matrix,
+      Accuracy = confusion_matrix$overall["Accuracy"],
+      Ensemble_Predictions = data.frame(
+        Actual = actual,
+        SVM = svm_pred,
+        RF = rf_pred,
+        Ensemble = ensemble_pred
+      )
+    )
+  }
+  
+  return(list(
+    svm_model = svm_model,
+    rf_model = rf_model,
+    predictions = ensemble_pred,
+    metrics = metrics,
+    individual_predictions = list(svm = svm_pred, rf = rf_pred)
+  ))
 }
 
   )
