@@ -1,7 +1,11 @@
 # GenericHelper R6 Class Documentation
 
 A comprehensive R6 class providing statistical analysis, visualization, and machine learning methods for data science workflows.
-
+## Usage
+```R
+source("https://raw.githubusercontent.com/vbojovic1980/GenericStatisticalHelper/main/GenericHelper.R")
+gh=GenericHelper$new()
+```
 ## Statistical Analysis Methods
 
 ### correlations_and_regressions
