@@ -5222,5 +5222,59 @@ pls_model = function(train_data, test_data, target_var, input_vars,
     )
   ))
 }
+,
+cubist_model = function(train_data, test_data, target_var, input_vars,
+                        committees = 50, neighbors = 0) {
+  
+  library(Cubist)
+  library(caret)
+  
+  # Prepare data
+  train_x <- train_data[, input_vars]
+  train_y <- train_data[[target_var]]
+  test_x <- test_data[, input_vars]
+  
+  # Train Cubist model
+  model <- cubist(x = train_x, y = train_y, 
+                  committees = committees,
+                  neighbors = neighbors)
+  
+  # Make predictions
+  predictions <- predict(model, test_x)
+  
+  # Calculate metrics
+  actual <- test_data[[target_var]]
+  valid_idx <- !is.na(actual) & !is.na(predictions)
+  actual_clean <- actual[valid_idx]
+  predicted_clean <- predictions[valid_idx]
+  
+  residuals <- actual_clean - predicted_clean
+  mae <- mean(abs(residuals))
+  rmse <- sqrt(mean(residuals^2))
+  r_squared <- cor(actual_clean, predicted_clean)^2
+  
+  metrics <- list(
+    MAE = mae,
+    RMSE = rmse,
+    R_squared = r_squared,
+    Predictions = data.frame(Actual = actual, Predicted = predictions)
+  )
+  
+  # Get variable usage
+  var_usage <- model$usage
+  
+  return(list(
+    model = model,
+    predictions = predictions,
+    metrics = metrics,
+    variable_usage = var_usage,
+    parameters = list(
+      committees = committees,
+      neighbors = neighbors
+    )
+  ))
+}
+
+
   )
 )
