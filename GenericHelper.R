@@ -6,6 +6,7 @@ library(corrplot)
 library("data.table")
 library(dendextend)
 library(dunn.test) 
+library(extraTrees)
 library(fingerprint) 
 if (!require("devtools")) install.packages("devtools")
 library(dplyr) 
@@ -4474,6 +4475,171 @@ knn_model = function(train_data, test_data, target_var, input_vars,
       scale_data = scale_data,
       regression = regression,
       tuned = tune_k,
+      n_predictors = length(input_vars)
+    ),
+    data_info = list(
+      train_size = nrow(train_data),
+      test_size = nrow(test_data),
+      target_variable = target_var
+    )
+  )
+  
+  return(result)
+}
+,
+extra_trees_ranger = function(train_data, test_data, target_var, input_vars, 
+                              ntree = 500, mtry = NULL, min_node_size = 5,
+                              splitrule = "extratrees", regression = TRUE, 
+                              num_random_splits = 1, tune_mtry = FALSE) {
+  
+  # Create formula
+  formula <- as.formula(paste(target_var, "~", paste(input_vars, collapse = " + ")))
+  
+  # Set mtry if not provided
+  if (is.null(mtry)) {
+    mtry <- if (regression) max(floor(length(input_vars)/3), 1) else floor(sqrt(length(input_vars)))
+  }
+  
+  # Tune mtry if requested
+  if (tune_mtry) {
+    mtry_values <- unique(round(seq(2, length(input_vars), length.out = 5)))
+    cv_results <- data.frame()
+    
+    for (mtry_val in mtry_values) {
+      set.seed(123)
+      cv_folds <- createFolds(train_data[[target_var]], k = 5)
+      cv_errors <- c()
+      
+      for (fold in cv_folds) {
+        train_fold <- train_data[-fold, ]
+        test_fold <- train_data[fold, ]
+        
+        model_cv <- ranger(
+          formula = formula,
+          data = train_fold,
+          num.trees = 100,
+          mtry = mtry_val,
+          min.node.size = min_node_size,
+          splitrule = splitrule,
+          num.random.splits = num_random_splits,
+          importance = "impurity"
+        )
+        
+        pred <- predict(model_cv, test_fold)$predictions
+        if (regression) {
+          cv_errors <- c(cv_errors, sqrt(mean((pred - test_fold[[target_var]])^2)))
+        } else {
+          cv_errors <- c(cv_errors, 1 - mean(pred == test_fold[[target_var]]))
+        }
+      }
+      
+      cv_results <- rbind(cv_results, 
+                          data.frame(mtry = mtry_val, Error = mean(cv_errors)))
+    }
+    
+    best_mtry <- cv_results$mtry[which.min(cv_results$Error)]
+  } else {
+    best_mtry <- mtry
+    cv_results <- NULL
+  }
+  
+  # Train final model
+  model <- ranger(
+    formula = formula,
+    data = train_data,
+    num.trees = ntree,
+    mtry = best_mtry,
+    min.node.size = min_node_size,
+    splitrule = splitrule,
+    num.random.splits = num_random_splits,
+    importance = "impurity",
+    seed = 123
+  )
+  
+  # Make predictions
+  predictions <- predict(model, test_data)$predictions
+  
+  # Get actual values
+  actual <- test_data[[target_var]]
+  
+  # Calculate comprehensive performance metrics
+  if (regression) {
+    valid_idx <- !is.na(actual) & !is.na(predictions)
+    actual_clean <- actual[valid_idx]
+    predicted_clean <- predictions[valid_idx]
+    
+    residuals <- actual_clean - predicted_clean
+    mae <- mean(abs(residuals))
+    rmse <- sqrt(mean(residuals^2))
+    r_squared <- cor(actual_clean, predicted_clean)^2
+    mape <- mean(abs(residuals / actual_clean)) * 100
+    mean_error <- mean(residuals)
+    median_ae <- median(abs(residuals))
+    
+    metrics <- list(
+      MAE = mae,
+      RMSE = rmse,
+      R_squared = r_squared,
+      MAPE = mape,
+      Mean_Error = mean_error,
+      Median_AE = median_ae,
+      Bias_Direction = ifelse(mean_error > 0, "Under-predicting", "Over-predicting"),
+      Predictions = data.frame(
+        Actual = actual, 
+        Predicted = predictions,
+        Residuals = actual - predictions
+      )
+    )
+    
+  } else {
+    confusion_matrix <- confusionMatrix(predictions, actual)
+    
+    auc_value <- NA
+    if (length(unique(actual)) == 2) {
+      tryCatch({
+        pred_probs <- predict(model, test_data, type = "response")$predictions
+        if (is.matrix(pred_probs)) {
+          positive_probs <- pred_probs[, 2]
+        } else {
+          positive_probs <- pred_probs
+        }
+        roc_obj <- roc(actual, positive_probs)
+        auc_value <- auc(roc_obj)
+      }, error = function(e) {
+        auc_value <- NA
+      })
+    }
+    
+    metrics <- list(
+      Confusion_Matrix = confusion_matrix,
+      Accuracy = confusion_matrix$overall["Accuracy"],
+      Kappa = confusion_matrix$overall["Kappa"],
+      Sensitivity = confusion_matrix$byClass["Sensitivity"],
+      Specificity = confusion_matrix$byClass["Specificity"],
+      F1_Score = confusion_matrix$byClass["F1"],
+      AUC = auc_value,
+      Predictions = data.frame(Actual = actual, Predicted = predictions)
+    )
+  }
+  
+  # Get variable importance
+  var_importance <- model$variable.importance
+  
+  # Return results
+  result <- list(
+    model = model,
+    predictions = predictions,
+    metrics = metrics,
+    variable_importance = var_importance,
+    tuning_results = cv_results,
+    parameters = list(
+      ntree = ntree,
+      mtry = best_mtry,
+      min_node_size = min_node_size,
+      splitrule = splitrule,
+      num_random_splits = num_random_splits,
+      regression = regression,
+      tuned = tune_mtry,
       n_predictors = length(input_vars)
     ),
     data_info = list(
