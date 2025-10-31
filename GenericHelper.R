@@ -2403,7 +2403,7 @@ shapiro_test_comprehensive = function(data, variables, alpha = 0.05) {
     
     data.frame(
       variable = var,
-      statistic = round(shapiro_result$statistic, 4),
+      W = round(shapiro_result$statistic, 4),
       p_value = round(shapiro_result$p.value, 6),
       normality = ifelse(shapiro_result$p.value >= alpha, "Normal", "Non-normal"),
       mean = round(mean(clean_data), 4),
