@@ -4865,6 +4865,83 @@ svm_rf_ensemble = function(train_data, test_data, target_var, input_vars,
     individual_predictions = list(svm = svm_pred, rf = rf_pred)
   ))
 }
-
+,
+suport_vector_regression_model = function(train_data, test_data, target_var, input_vars, 
+                                           kernel = "radial", cost = 1, gamma = 0.1,
+                                           epsilon = 0.1, scale = TRUE) {
+  
+  library(e1071)
+  library(caret)
+  
+  # Create formula
+  formula <- as.formula(paste(target_var, "~", paste(input_vars, collapse = " + ")))
+  
+  # Train SVR model
+  model <- svm(
+    formula,
+    data = train_data,
+    type = "eps-regression",  # This makes it SVR instead of SVM classification
+    kernel = kernel,
+    cost = cost,
+    gamma = gamma,
+    epsilon = epsilon,        # Epsilon parameter for SVR
+    scale = scale
+  )
+  
+  # Make predictions
+  predictions <- predict(model, test_data)
+  
+  # Get actual values
+  actual <- test_data[[target_var]]
+  
+  # Calculate comprehensive performance metrics
+  valid_idx <- !is.na(actual) & !is.na(predictions)
+  actual_clean <- actual[valid_idx]
+  predicted_clean <- predictions[valid_idx]
+  
+  residuals <- actual_clean - predicted_clean
+  mae <- mean(abs(residuals))
+  rmse <- sqrt(mean(residuals^2))
+  r_squared <- cor(actual_clean, predicted_clean)^2
+  mape <- mean(abs(residuals / actual_clean)) * 100
+  mean_error <- mean(residuals)
+  median_ae <- median(abs(residuals))
+  
+  metrics <- list(
+    MAE = mae,
+    RMSE = rmse,
+    R_squared = r_squared,
+    MAPE = mape,
+    Mean_Error = mean_error,
+    Median_AE = median_ae,
+    Bias_Direction = ifelse(mean_error > 0, "Under-predicting", "Over-predicting"),
+    Predictions = data.frame(
+      Actual = actual, 
+      Predicted = predictions,
+      Residuals = actual - predictions
+    )
+  )
+  
+  # Return results
+  result <- list(
+    model = model,
+    predictions = predictions,
+    metrics = metrics,
+    parameters = list(
+      kernel = kernel,
+      cost = cost,
+      gamma = gamma,
+      epsilon = epsilon,
+      scale = scale
+    ),
+    data_info = list(
+      train_size = nrow(train_data),
+      test_size = nrow(test_data),
+      target_variable = target_var
+    )
+  )
+  
+  return(result)
+}
   )
 )
